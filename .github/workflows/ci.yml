@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python (pinned — Phase D5)
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      # A GitHub-hosted runner starts from a bare image — this is the "clean
+      # env" the Phase D5 import smoke test (tests/unit/test_import_smoke.py)
+      # exists to validate against. Nothing here is pre-installed the way a
+      # long-lived local dev env can accumulate extra packages.
+      - name: Install dependencies (fresh install)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run test suite
+        run: pytest tests/ -q --cov=src --cov-report=term-missing

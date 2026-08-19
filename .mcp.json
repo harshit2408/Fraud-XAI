@@ -1,0 +1,11 @@
+﻿{
+  "mcpServers": {
+    "ecc-memory-vault": {
+      "command": "ecc-memory-mcp",
+      "env": {
+        "ECC_MEMORY_HARNESS": "claude-project",
+        "ECC_MEMORY_ALLOW_USER_SCOPE": "1"
+      }
+    }
+  }
+}

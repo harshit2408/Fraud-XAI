@@ -1,0 +1,109 @@
+networks:
+  fraud_net:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:
+
+services:
+
+  # ── 1. Inference API + Kafka Consumer ───────────────────────────────────────
+  # FastAPI serves HTTP predictions. Kafka consumer runs as an asyncio background
+  # task inside the same process — no separate container needed.
+  fraud-api:
+    build: .
+    container_name: fraud-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src
+      - ./models:/app/models
+      - ./logs:/app/logs
+      - ./config:/app/config
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - fraud_net
+
+  # ── 2. Kafka (KRaft mode — no Zookeeper) ────────────────────────────────────
+  # Single-node Kafka using built-in KRaft consensus protocol.
+  # Zookeeper is not required from Kafka 3.3+.
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      CLUSTER_ID: "fraud-detection-cluster-01"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - fraud_net
+
+  # ── 3. Prometheus ─────────────────────────────────────────────────────────────
+  # Scrapes /metrics from fraud-api every 15s.
+  # Stores time-series data for Grafana to query.
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - fraud-api
+    networks:
+      - fraud_net
+
+  # ── 4. Grafana ────────────────────────────────────────────────────────────────
+  # Dashboard UI over Prometheus. Auto-provisions datasource and dashboards
+  # from the mounted config directory on startup.
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      - prometheus
+    networks:
+      - fraud_net
+
+# MLflow: NOT a service. Run locally during training only:
+#   make mlflow   →   mlflow ui --backend-store-uri ./mlruns --port 5000
+#
+# Kafka Producer: NOT a service. Run as a one-shot script:
+#   make stream   →   python src/streaming/producer.py --rate 200 --limit 5000

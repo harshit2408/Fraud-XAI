@@ -1,0 +1,41 @@
+Codemap Analysis Report
+Generated: 2026-08-05
+
+STATUS: Initial generation — no prior codemaps existed in docs/CODEMAPS/.
+No diff percentage calculated (baseline run).
+
+Files scanned: 30 Python source files under src/, plus config/config.yaml,
+docker-compose.yml, Makefile, requirements.txt, .ai/rules.md, .ai/prd.md.
+
+Codemaps written:
+- docs/CODEMAPS/architecture.md
+- docs/CODEMAPS/backend.md
+- docs/CODEMAPS/frontend.md
+- docs/CODEMAPS/data.md
+- docs/CODEMAPS/dependencies.md
+
+Architecture summary:
+- Single-repo Python ML system (no monorepo). FastAPI backend (Phase 0/5 stub),
+  no custom frontend (Grafana used for dashboards).
+- 4-container Docker Compose stack: fraud-api, kafka (KRaft), prometheus, grafana.
+- Data pipeline: Kaggle CSV -> preprocess.py orchestrator -> parquet features/labels.
+- Three models: XGBoost, LightGBM, custom TFT (PyTorch), blended via ModelEnsemble.
+
+Dependencies detected: xgboost, lightgbm, torch/pytorch-forecasting/pytorch-lightning,
+shap, mlflow, fastapi/uvicorn, kafka-python, evidently, optuna, pandas/numpy/pyarrow.
+
+Stub/incomplete modules flagged (empty packages or missing referenced files):
+- src/explainability/ (empty; SHAP integration planned Phase 4)
+- src/monitoring/ (empty; Makefile references src/monitoring/drift_reporter.py
+  which does not exist yet — will break `make monitor`)
+- src/api/routes/, src/api/schemas/, src/api/middleware/ (empty; Phase 5 scaffolding)
+
+Staleness warnings:
+- reports/RESULTS.md and reports/phase2_results.json contain point-in-time
+  results; recommend cross-checking against mlruns/ before citing metrics.
+- No file in the repo is yet 90+ days stale relative to generation date
+  (most recent model artifacts dated July 2026).
+
+No architecture changes to report (baseline). Re-run this command after the
+next major feature addition (e.g. Phase 4 SHAP explainability or Phase 5
+/predict route) to generate a diff against this baseline.

@@ -1,0 +1,140 @@
+project:
+  name: "fraud-detection-explainable"
+  version: "1.0.0"
+  random_seed: 42
+
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  train_file: "train_transaction.csv"
+  identity_file: "train_identity.csv"
+  target_col: "isFraud"
+  temporal_col: "TransactionDT"
+  train_split_ratio: 0.70
+  val_split_ratio: 0.10
+  sequence_length: 10  # for TFT: last N transactions per card
+
+features:
+  drop_cols: ["TransactionID", "TransactionDT"]
+  v_features_pca_components: 30  # PCA on V1-V339
+  categorical_cols:
+    - "ProductCD"
+    - "card4"
+    - "card6"
+    - "P_emaildomain"
+    - "R_emaildomain"
+    - "M1"
+    - "M2"
+    - "M3"
+    - "M4"
+    - "M5"
+    - "M6"
+    - "M7"
+    - "M8"
+    - "M9"
+    - "id_12"
+    - "id_15"
+    - "id_16"
+    - "id_23"
+    - "id_27"
+    - "id_28"
+    - "id_29"
+    - "id_30"
+    - "id_31"
+    - "id_33"
+    - "id_34"
+    - "id_35"
+    - "id_36"
+    - "id_37"
+    - "id_38"
+    - "DeviceType"
+    - "DeviceInfo"
+  numerical_cols: []  # auto-detected after drop and cat separation
+
+model:
+  xgboost:
+    n_estimators: 887
+    max_depth: 10
+    learning_rate: 0.09696200612789875
+    subsample: 0.8382111670615123
+    colsample_bytree: 0.6186070548544907
+    min_child_weight: 4
+    reg_alpha: 0.014571229075512624
+    reg_lambda: 1.1091336812755855e-07
+    gamma: 5.543434625011016e-08
+    device: "auto"  # auto-detect CUDA/CPU (Phase D7); resolved by src/device.py
+    tree_method: "hist"
+    scale_pos_weight: 29  # set to (neg_count / pos_count) at runtime
+    eval_metric: "aucpr"
+    early_stopping_rounds: 100
+  lightgbm:
+    n_estimators: 1200
+    max_depth: -1
+    num_leaves: 64
+    learning_rate: 0.02
+    subsample: 0.8
+    colsample_bytree: 0.8
+    min_data_in_leaf: 50
+    reg_alpha: 0.1
+    reg_lambda: 1.0
+    scale_pos_weight: 29
+    eval_metric: "average_precision"
+    early_stopping_rounds: 100
+  tft:
+    max_encoder_length: 10
+    max_prediction_length: 1
+    hidden_size: 16
+    attention_head_size: 4
+    num_lstm_layers: 1
+    dropout: 0.3
+    hidden_continuous_size: 32
+    learning_rate: 0.0023288031819030802
+    max_epochs: 100
+    batch_size: 128
+    patience: 10
+    gradient_clip_val: 1.0
+    device: "auto"  # auto-detect CUDA/CPU
+    # Phase B4: mixed precision, CUDA-only. Re-enabled now that inputs are
+    # scaled (see src/data/sequence_builder.py QuantileTransformer); set to
+    # false if NaNs reappear on a given GPU/driver combination.
+    use_amp: true
+
+imbalance:
+  # Resampling and loss weighting are independent knobs — combining a resampler
+  # with a count-based loss weight (e.g. oversample + weighted_bce) double-corrects
+  # for imbalance. Pick exactly one primary mechanism; see train_tft.py:resolve_imbalance_config.
+  sampling_strategy: "oversample"  # options: none, oversample, smote (smote not yet supported for sequence data)
+  loss_function: "focal_loss"      # options: focal_loss, weighted_bce, bce
+  smote_k_neighbors: 5
+  focal_loss_gamma: 2.0
+  focal_loss_alpha: 0.25
+
+thresholds:
+  default: 0.5
+  cost_fn: 500    # cost of false negative ($): fraud goes undetected
+  cost_fp: 5      # cost of false positive ($): legitimate tx blocked, customer friction
+  revenue_tp: 480 # value recovered from true positive: money saved + investigation avoided
+
+mlflow:
+  tracking_uri: "file:./mlruns"  # local file-based tracking
+  experiment_name: "fraud_detection"
+
+serving:
+  host: "0.0.0.0"
+  port: 8000
+  model_path: "models/xgb_model.pkl"
+  tft_model_path: "models/tft_model.pt"
+  log_file: "logs/predictions.jsonl"
+
+kafka:
+  bootstrap_servers: "localhost:9092"
+  input_topic: "transactions"
+  output_topic: "fraud_alerts"
+  consumer_group: "fraud_detector"
+  producer_rate_per_second: 100
+
+monitoring:
+  reference_data_path: "data/processed/train_features.parquet"
+  evidently_report_dir: "monitoring/reports"
+  drift_check_interval_hours: 24
+  prometheus_port: 8001

@@ -1,0 +1,25 @@
+{
+  "split_used_for_selection": "validation",
+  "note": "Test split was never loaded by this script; selection is based on val_pr_auc only.",
+  "winner": "scale_pos_weight",
+  "results": {
+    "scale_pos_weight": {
+      "time_s": 3.5359044075012207,
+      "val_pr_auc": 0.6037829161486565,
+      "val_best_f1": 0.5859229747675964,
+      "val_f1_threshold": 0.843608021736145
+    },
+    "SMOTE": {
+      "time_s": 7.206533432006836,
+      "val_pr_auc": 0.579936573100158,
+      "val_best_f1": 0.5622681505034446,
+      "val_f1_threshold": 0.45266780257225037
+    },
+    "SMOTE + scale_pos_weight": {
+      "time_s": 7.070449113845825,
+      "val_pr_auc": 0.5591747170788082,
+      "val_best_f1": 0.5521235521235521,
+      "val_f1_threshold": 0.9437731504440308
+    }
+  }
+}

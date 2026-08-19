@@ -1,0 +1,56 @@
+Total Trials: 55
+Completed: 20
+Pruned: 32
+
+--- Best 5 Trials ---
+Rank 1: Trial 33, PR-AUC: 0.3295
+  Params: {'hidden_size': 16, 'attention_head_size': 4, 'num_lstm_layers': 1, 'hidden_continuous_size': 32, 'dropout': 0.3, 'learning_rate': 0.0023288031819030802, 'batch_size': 128}
+Rank 2: Trial 46, PR-AUC: 0.3200
+  Params: {'hidden_size': 16, 'attention_head_size': 4, 'num_lstm_layers': 1, 'hidden_continuous_size': 32, 'dropout': 0.3, 'learning_rate': 0.004426518275383714, 'batch_size': 128}
+Rank 3: Trial 19, PR-AUC: 0.3192
+  Params: {'hidden_size': 16, 'attention_head_size': 4, 'num_lstm_layers': 1, 'hidden_continuous_size': 32, 'dropout': 0.3, 'learning_rate': 0.002645756322037513, 'batch_size': 128}
+Rank 4: Trial 25, PR-AUC: 0.3191
+  Params: {'hidden_size': 16, 'attention_head_size': 4, 'num_lstm_layers': 1, 'hidden_continuous_size': 32, 'dropout': 0.3, 'learning_rate': 0.002660759206755142, 'batch_size': 128}
+Rank 5: Trial 13, PR-AUC: 0.3142
+  Params: {'hidden_size': 16, 'attention_head_size': 4, 'num_lstm_layers': 1, 'hidden_continuous_size': 32, 'dropout': 0.3, 'learning_rate': 0.003235730520557439, 'batch_size': 128}
+
+--- Top 10 Parameter Frequency ---
+
+hidden_size:
+hidden_size
+16    9
+32    1
+
+attention_head_size:
+attention_head_size
+4    9
+2    1
+
+num_lstm_layers:
+num_lstm_layers
+1    10
+
+hidden_continuous_size:
+hidden_continuous_size
+32    9
+8     1
+
+dropout:
+dropout
+0.3    9
+0.2    1
+
+batch_size:
+batch_size
+128    9
+256    1
+
+learning_rate summary:
+count    10.000000
+mean      0.003445
+std       0.001807
+min       0.001112
+25%       0.002408
+50%       0.002948
+75%       0.004201
+max       0.007710

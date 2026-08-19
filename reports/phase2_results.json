@@ -1,0 +1,86 @@
+{
+  "name":{
+    "XGB depth=6, lr=0.05, reg":"XGB depth=6, lr=0.05, reg",
+    "XGB depth=5, lr=0.03, strong_reg":"XGB depth=5, lr=0.03, strong_reg",
+    "LGBM leaves=63, lr=0.03":"LGBM leaves=63, lr=0.03",
+    "LGBM leaves=31, lr=0.02, strong_reg":"LGBM leaves=31, lr=0.02, strong_reg",
+    "CatBoost depth=6, lr=0.05":"CatBoost depth=6, lr=0.05"
+  },
+  "pr_train":{
+    "XGB depth=6, lr=0.05, reg":0.8878066438,
+    "XGB depth=5, lr=0.03, strong_reg":0.8441732118,
+    "LGBM leaves=63, lr=0.03":0.4499382703,
+    "LGBM leaves=31, lr=0.02, strong_reg":0.4093409159,
+    "CatBoost depth=6, lr=0.05":0.8921065322
+  },
+  "pr_val":{
+    "XGB depth=6, lr=0.05, reg":0.625728976,
+    "XGB depth=5, lr=0.03, strong_reg":0.6194060369,
+    "LGBM leaves=63, lr=0.03":0.412550234,
+    "LGBM leaves=31, lr=0.02, strong_reg":0.394181799,
+    "CatBoost depth=6, lr=0.05":0.6169738219
+  },
+  "pr_test":{
+    "XGB depth=6, lr=0.05, reg":0.540619994,
+    "XGB depth=5, lr=0.03, strong_reg":0.5423636292,
+    "LGBM leaves=63, lr=0.03":0.3611201453,
+    "LGBM leaves=31, lr=0.02, strong_reg":0.3251726508,
+    "CatBoost depth=6, lr=0.05":0.5233897343
+  },
+  "roc_test":{
+    "XGB depth=6, lr=0.05, reg":0.9144301171,
+    "XGB depth=5, lr=0.03, strong_reg":0.9158405783,
+    "LGBM leaves=63, lr=0.03":0.8799434885,
+    "LGBM leaves=31, lr=0.02, strong_reg":0.8758418075,
+    "CatBoost depth=6, lr=0.05":0.9166955029
+  },
+  "f1_test":{
+    "XGB depth=6, lr=0.05, reg":0.5309081323,
+    "XGB depth=5, lr=0.03, strong_reg":0.5292233787,
+    "LGBM leaves=63, lr=0.03":0.4136113108,
+    "LGBM leaves=31, lr=0.02, strong_reg":0.3934967611,
+    "CatBoost depth=6, lr=0.05":0.5142780891
+  },
+  "f1_thresh":{
+    "XGB depth=6, lr=0.05, reg":0.7698622942,
+    "XGB depth=5, lr=0.03, strong_reg":0.8184010386,
+    "LGBM leaves=63, lr=0.03":0.1242718229,
+    "LGBM leaves=31, lr=0.02, strong_reg":0.1246139536,
+    "CatBoost depth=6, lr=0.05":0.8249018301
+  },
+  "f1_train":{
+    "XGB depth=6, lr=0.05, reg":0.8089610672,
+    "XGB depth=5, lr=0.03, strong_reg":0.7673598354,
+    "LGBM leaves=63, lr=0.03":0.4815488655,
+    "LGBM leaves=31, lr=0.02, strong_reg":0.4639299943,
+    "CatBoost depth=6, lr=0.05":0.8246981055
+  },
+  "rec_5fpr":{
+    "XGB depth=6, lr=0.05, reg":0.6628937008,
+    "XGB depth=5, lr=0.03, strong_reg":0.6636318898,
+    "LGBM leaves=63, lr=0.03":0.5492125984,
+    "LGBM leaves=31, lr=0.02, strong_reg":0.5383858268,
+    "CatBoost depth=6, lr=0.05":0.6584645669
+  },
+  "gap":{
+    "XGB depth=6, lr=0.05, reg":0.3471866498,
+    "XGB depth=5, lr=0.03, strong_reg":0.3018095826,
+    "LGBM leaves=63, lr=0.03":0.088818125,
+    "LGBM leaves=31, lr=0.02, strong_reg":0.0841682651,
+    "CatBoost depth=6, lr=0.05":0.368716798
+  },
+  "best_iter":{
+    "XGB depth=6, lr=0.05, reg":720,
+    "XGB depth=5, lr=0.03, strong_reg":1708,
+    "LGBM leaves=63, lr=0.03":3,
+    "LGBM leaves=31, lr=0.02, strong_reg":5,
+    "CatBoost depth=6, lr=0.05":935
+  },
+  "time":{
+    "XGB depth=6, lr=0.05, reg":36.2032427788,
+    "XGB depth=5, lr=0.03, strong_reg":103.0672662258,
+    "LGBM leaves=63, lr=0.03":7.5355122089,
+    "LGBM leaves=31, lr=0.02, strong_reg":9.0924873352,
+    "CatBoost depth=6, lr=0.05":662.7317299843
+  }
+}

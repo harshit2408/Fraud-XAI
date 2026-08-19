@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Data files (never commit raw or processed data)
+data/raw/
+data/processed/
+
+# Trained model artifacts
+models/
+
+# Runtime logs
+logs/
+
+# MLflow local runs
+mlruns/
+
+# Monitoring runtime output
+monitoring/reports/
+monitoring/alerts/
+
+# Environment / secrets
+.env
+*.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Pre-commit
+.pre-commit-cache/
+
+.ai/
+.claude/
+.cursor/
+.ecc/
