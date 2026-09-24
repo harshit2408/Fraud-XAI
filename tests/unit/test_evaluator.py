@@ -248,6 +248,156 @@ def test_compute_metrics_at_threshold(evaluator, mock_predictions):
     assert metrics["accuracy"] == 0.8   # 8 / 10
 
 
+# ── Phase 9.0: precision at a fixed recall floor ───────────────────────
+
+def test_precision_at_recall_matches_curve_point(evaluator):
+    """The reported (precision, recall, threshold) triple must be an actual
+    point on precision_recall_curve, not an interpolated or off-by-one
+    value."""
+    from sklearn.metrics import precision_recall_curve
+
+    rng = np.random.default_rng(0)
+    y_true = np.array([0] * 80 + [1] * 20)
+    y_prob = np.concatenate([
+        rng.uniform(0.0, 0.6, size=80),
+        rng.uniform(0.4, 1.0, size=20),
+    ])
+
+    out = evaluator.precision_at_recall(y_true, y_prob, target_recall=0.80)
+
+    precision, recall, thresholds = precision_recall_curve(y_true, y_prob)
+    matches = np.flatnonzero(np.isclose(thresholds, out["threshold"]))
+    assert matches.size == 1
+    i = int(matches[0])
+    assert np.isclose(out["precision"], precision[i])
+    assert np.isclose(out["achieved_recall"], recall[i])
+
+
+def test_precision_at_recall_returns_highest_threshold_meeting_the_floor(evaluator):
+    """The method must pick the tightest operating point that still clears
+    the recall floor — the largest threshold whose recall is >= target —
+    not the most permissive one."""
+    y_true = np.array([1, 1, 1, 1, 0, 0, 0, 0, 0, 0])
+    y_prob = np.array([0.95, 0.85, 0.55, 0.45, 0.50, 0.40, 0.30, 0.20, 0.10, 0.05])
+
+    out = evaluator.precision_at_recall(y_true, y_prob, target_recall=0.75)
+    assert out["achieved_recall"] >= 0.75
+    assert np.isclose(out["achieved_recall"], 0.75)
+    assert np.isclose(out["precision"], 1.0)
+    assert out["threshold"] >= 0.55 - 1e-9
+
+
+def test_precision_at_recall_full_recall_floor_flags_everything(evaluator):
+    """target_recall=1.0 must return the point that catches every positive."""
+    y_true = np.array([1, 1, 0, 0, 0, 0, 0, 0, 0, 0])
+    y_prob = np.array([0.9, 0.4, 0.8, 0.3, 0.2, 0.1, 0.1, 0.05, 0.05, 0.01])
+
+    out = evaluator.precision_at_recall(y_true, y_prob, target_recall=1.0)
+    assert np.isclose(out["achieved_recall"], 1.0)
+    assert out["precision"] <= 2.0 / 3.0 + 1e-9
+
+
+@pytest.mark.parametrize("bad_recall", [-0.1, 1.1, 2.0])
+def test_precision_at_recall_rejects_out_of_range_target(evaluator, bad_recall):
+    y_true = np.array([1, 0, 1, 0])
+    y_prob = np.array([0.9, 0.1, 0.8, 0.2])
+    with pytest.raises(ValueError, match="target_recall must be in"):
+        evaluator.precision_at_recall(y_true, y_prob, bad_recall)
+
+
+def test_precision_at_recall_rejects_all_negative_labels(evaluator):
+    y_true = np.zeros(10, dtype=int)
+    y_prob = np.linspace(0.0, 1.0, 10)
+    with pytest.raises(ValueError, match="no positive labels"):
+        evaluator.precision_at_recall(y_true, y_prob, 0.5)
+
+
+def test_precision_at_recall_f1_is_consistent_with_returned_p_and_r(evaluator, mock_predictions):
+    y_true, y_prob = mock_predictions
+    out = evaluator.precision_at_recall(y_true, y_prob, target_recall=0.5)
+    p, r = out["precision"], out["achieved_recall"]
+    expected_f1 = 2 * p * r / (p + r)
+    assert np.isclose(out["f1"], expected_f1)
+
+
+def test_precision_at_recall_recall_1_0_floor_is_always_reachable(evaluator):
+    """`precision_recall_curve` always emits a threshold at the minimum
+    score, where `y_prob >= t` flags every row and recall is 1.0. So for any
+    `target_recall <= 1.0` at least that point qualifies — the "no threshold
+    reaches recall" raise is defensive (guards degenerate/future inputs) but
+    not triggerable through the normal curve. This pins that property so a
+    future refactor that drops the min-score point is caught."""
+    y_true = np.array([1, 1, 0, 0, 0, 0, 0, 0, 0, 0])
+    y_prob = np.array([0.9, 0.4, 0.8, 0.3, 0.2, 0.1, 0.1, 0.05, 0.05, 0.01])
+    out = evaluator.precision_at_recall(y_true, y_prob, target_recall=1.0)
+    assert np.isclose(out["achieved_recall"], 1.0)
+
+
+def test_precision_at_recall_raise_path_is_defensive_only(evaluator, monkeypatch):
+    """Directly exercise the unreachable-floor branch by feeding a curve
+    whose max recall is below the floor, confirming the guard raises with the
+    documented message rather than returning a bogus point."""
+    import src.evaluation.evaluator as ev_mod
+
+    def fake_curve(y_true, y_prob):
+        # precision (n+1), recall (n+1), thresholds (n): max recall 0.4
+        return (
+            np.array([0.5, 0.6, 1.0]),
+            np.array([0.4, 0.2, 0.0]),
+            np.array([0.3, 0.7]),
+        )
+
+    monkeypatch.setattr(ev_mod, "precision_recall_curve", fake_curve)
+    with pytest.raises(ValueError, match="no threshold reaches recall"):
+        evaluator.precision_at_recall(
+            np.array([1, 0, 1, 0]), np.array([0.9, 0.1, 0.8, 0.2]), 0.8
+        )
+
+
+def test_precision_at_recall_deterministic_hand_computed_point(evaluator):
+    """Tiny fixture with a hand-worked expected answer, so an off-by-one in
+    the [:-1] slice or the thresholds index fails loudly.
+
+    Rows (score, label): (0.9,1) (0.7,1) (0.5,0) (0.3,1) (0.1,0)
+    3 positives total. precision_recall_curve thresholds = [0.3,0.5,0.7,0.9].
+      t=0.3: pred {0.9,0.7,0.5,0.3} -> TP=3 FP=1 -> P=0.75  R=1.00
+      t=0.5: pred {0.9,0.7,0.5}     -> TP=2 FP=1 -> P=2/3   R=2/3
+      t=0.7: pred {0.9,0.7}         -> TP=2 FP=0 -> P=1.00  R=2/3
+      t=0.9: pred {0.9}             -> TP=1 FP=0 -> P=1.00  R=1/3
+    Floor 0.70: qualifying points are t=0.3 (R=1.0). Largest such threshold
+    is 0.3 -> P=0.75, achieved_recall=1.0.
+    """
+    y_true = np.array([1, 1, 0, 1, 0])
+    y_prob = np.array([0.9, 0.7, 0.5, 0.3, 0.1])
+
+    out = evaluator.precision_at_recall(y_true, y_prob, target_recall=0.70)
+    assert np.isclose(out["threshold"], 0.3)
+    assert np.isclose(out["precision"], 0.75)
+    assert np.isclose(out["achieved_recall"], 1.0)
+
+    # Floor 0.60: qualifying thresholds are 0.3 (R=1.0), 0.5 (R=2/3),
+    # 0.7 (R=2/3). Largest is 0.7 -> P=1.0, R=2/3.
+    out2 = evaluator.precision_at_recall(y_true, y_prob, target_recall=0.60)
+    assert np.isclose(out2["threshold"], 0.7)
+    assert np.isclose(out2["precision"], 1.0)
+    assert np.isclose(out2["achieved_recall"], 2.0 / 3.0)
+
+
+def test_precision_at_recall_handles_heavy_probability_ties(evaluator):
+    """Many rows sharing a probability collapse curve thresholds; the
+    'qualifying points form a prefix' assumption must still hold."""
+    # 4 positives, 6 negatives, scores in only 3 distinct bands with ties.
+    y_true = np.array([1, 1, 1, 1, 0, 0, 0, 0, 0, 0])
+    y_prob = np.array([0.8, 0.8, 0.4, 0.4, 0.8, 0.4, 0.4, 0.1, 0.1, 0.1])
+
+    out = evaluator.precision_at_recall(y_true, y_prob, target_recall=0.50)
+    # recall 0.5 = 2/4 positives; reachable at t=0.8 (the two 0.8 positives,
+    # plus one 0.8 negative) -> P=2/3, R=0.5.
+    assert out["achieved_recall"] >= 0.50
+    assert np.isclose(out["achieved_recall"], 0.5)
+    assert np.isclose(out["precision"], 2.0 / 3.0)
+
+
 # ── C5: per-slice metrics ───────────────────────────────────────────────
 
 @pytest.fixture

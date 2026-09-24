@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "model_type": "ensemble",
+  "config_hash": "9d647d076538a1c070e1ce103035877f29d3ffa9d875224ca2735c56efb1f9fe",
+  "git_sha": "f73b8af1cb0d1a77a7f9228b91c51bd26055b92d",
+  "dataset_hash": "d20f03c02e8de9b1358025a639374c1913a0dce8f8c129b576839e01ebed06c6",
+  "dataset_files": [
+    "test_features.parquet",
+    "test_labels.parquet",
+    "train_features.parquet",
+    "train_labels.parquet",
+    "val_features.parquet",
+    "val_labels.parquet"
+  ],
+  "random_seed": 42,
+  "keep_lgbm": true,
+  "metrics": {
+    "val_pr_auc_final": 0.6839726931965316,
+    "test_pr_auc_final": 0.5501705972235109,
+    "test_roc_auc_final": 0.915426461287729,
+    "lgbm_lift_val_pr_auc": 0.007321248209534503,
+    "lgbm_lift_test_pr_auc_diagnostic": 0.009393366858547414,
+    "optimal_threshold": 0.01283068153868707,
+    "no_tft_threshold": 0.011697487456461961,
+    "final_weight_xgb": 0.618,
+    "final_weight_tft": 0.008,
+    "final_weight_lgbm": 0.374
+  },
+  "model_run_ids": {
+    "xgb": "9d60068e5507449e8dd90ccd9e576071",
+    "tft": "64c3745f50a34cf882d1571fcb7c9f3f",
+    "lgbm": "990e44b3a86b4cc488cacd2f135a7892"
+  },
+  "created_at": "2026-09-09T10:54:39.208931+00:00"
+}

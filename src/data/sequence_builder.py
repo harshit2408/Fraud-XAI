@@ -106,6 +106,34 @@ class SequenceBuilder:
             for i in self.static_categorical_indices
         ]
 
+    def fit_scaler_on(self, X: pd.DataFrame) -> None:
+        """Fit the QuantileTransformer on `X` alone and store it, without
+        building sequences or touching any other split.
+
+        2026-09-09 (4-agent ML review, ecc:code-reviewer): `build_sequences`
+        fits `self.scaler` on whatever frame it is given. Phase B6's
+        `_build_sequences_for_splits` (train_tft.py) concatenates train+val
+        into one frame *for sequence continuity* — a val card's first
+        transaction correctly retains real train history — but that combined
+        frame was also what `fit_scaler=True` saw, so the scaler's quantile
+        boundaries were fit on train+val rather than train alone. Val's
+        distribution (temporally later) leaked into the transform val is
+        then scored through, inflating val PR-AUC and biasing every
+        selection that reads it (early stopping, the ensemble weight
+        search). Call this on the train-only frame first, then build the
+        train+val combined sequences with `fit_scaler=False` so the already
+        -fitted scaler is reused (transform-only) for both splits.
+        """
+        numeric_cols, _ = self._identify_features(X)
+        numeric_data = X[numeric_cols].values.astype(np.float32)
+        n_quantiles = min(1000, max(len(numeric_data), 10))
+        self.scaler = QuantileTransformer(
+            output_distribution="normal",
+            n_quantiles=n_quantiles,
+            random_state=0,
+        )
+        self.scaler.fit(numeric_data)
+
     def _identify_features(self, df: pd.DataFrame) -> Tuple[List[str], List[str]]:
         """
         Identify time-varying numeric and static categorical features.
@@ -140,10 +168,46 @@ class SequenceBuilder:
         }
         exclude_cols.update(static_cols)
 
+        # PRD Phase 9 P9-2: the UID (card1_addr1_D1n) aggregate features are
+        # added for the two GBDTs (XGBoost, LightGBM) only. The TFT's sequence
+        # grouping is already a per-card1 client mechanism (PRD §10 9.2: "a
+        # separate, already-present mechanism — do not assume it needs the
+        # richer UID grouping before measuring"), and its calibrator is frozen
+        # against the pre-P9-2 feature width. Excluding uid_* here keeps the
+        # TFT's input dimension stable so its existing artifact stays valid
+        # while the GBDTs pick the features up.
+        uid_cols = [c for c in df.columns if c.startswith("uid_")]
+
+        # PRD Phase 9 P9-4: same treatment for the multi-window RFM/velocity
+        # aggregates and the dist1 gradient features. The PRD scopes 9.4 to an
+        # "XGBoost + LightGBM retrain", and the TFT already models per-card
+        # temporal structure through its own sequence encoder — feeding it
+        # hand-rolled trailing-window counts over the same history would be
+        # redundant, and widening its input would invalidate the frozen
+        # calibrator for no measured gain.
+        p9_4_cols = [
+            c
+            for c in df.columns
+            if c.startswith("tx_count_")
+            and c.endswith("_per_card")
+            and c != "tx_count_per_card"
+        ] + [
+            c
+            for c in (
+                "amt_24h_mean_per_card",
+                "amt_24h_vs_card_mean_ratio",
+                "dist1_log",
+                "dist1_high",
+            )
+            if c in df.columns
+        ]
+
         # All remaining numeric columns are time-varying features
         numeric_cols = [
             c for c in df.columns
             if c not in exclude_cols
+            and c not in uid_cols
+            and c not in p9_4_cols
             and df[c].dtype in [np.float64, np.float32, np.int64, np.int32, np.int16, np.int8, np.float16]
         ]
 

@@ -26,7 +26,7 @@
   "annotations": {
     "list": []
   },
-  "description": "Fraud Detection System — real-time monitoring dashboard",
+  "description": "Fraud Detection System \u2014 real-time monitoring dashboard",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
@@ -37,23 +37,45 @@
       "datasource": "${DS_PROMETHEUS}",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.05 },
-              { "color": "red", "value": 0.1 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.05
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
             ]
           },
           "unit": "percentunit"
         }
       },
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
       "id": 1,
       "title": "Fraud Rate (%)",
       "type": "stat",
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
@@ -66,24 +88,46 @@
       "datasource": "${DS_PROMETHEUS}",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.08 },
-              { "color": "red", "value": 0.1 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.08
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
             ]
           },
           "unit": "s",
           "max": 0.2
         }
       },
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
       "id": 2,
       "title": "Prediction Latency P95",
       "type": "gauge",
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
@@ -95,9 +139,16 @@
     {
       "datasource": "${DS_PROMETHEUS}",
       "fieldConfig": {
-        "defaults": { "unit": "reqpm" }
+        "defaults": {
+          "unit": "reqpm"
+        }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
       "id": 3,
       "title": "Request Volume (predictions/min)",
       "type": "timeseries",
@@ -113,13 +164,29 @@
     {
       "datasource": "${DS_PROMETHEUS}",
       "fieldConfig": {
-        "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" } }
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        }
       },
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 4 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 4
+      },
       "id": 4,
       "title": "Model Version",
       "type": "stat",
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
@@ -132,25 +199,58 @@
       "datasource": "${DS_PROMETHEUS}",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 1 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
             ]
           },
           "mappings": [
-            { "options": { "0": { "text": "No Drift" } }, "type": "value" },
-            { "options": { "1": { "text": "DRIFT DETECTED" } }, "type": "value" }
+            {
+              "options": {
+                "0": {
+                  "text": "No Drift"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "1": {
+                  "text": "DRIFT DETECTED"
+                }
+              },
+              "type": "value"
+            }
           ]
         }
       },
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 4 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 4
+      },
       "id": 5,
       "title": "Feature Drift Indicator",
       "type": "stat",
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
@@ -158,16 +258,65 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "description": "Kafka consumer backlog (sum of highwater - position across assigned partitions). PRD 6.4 gates the streaming demo on this staying under 500 -- the red threshold. -1 means the backlog is not yet known (no partition assignment or no high-water mark), not a healthy zero.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": -1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 500
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "id": 6,
+      "title": "Kafka Consumer Lag (messages)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "datasource": "${DS_PROMETHEUS}",
+          "expr": "fraud_consumer_lag",
+          "legendFormat": "Consumer lag",
+          "refId": "A"
+        }
+      ]
     }
   ],
   "refresh": "30s",
   "schemaVersion": 38,
-  "tags": ["fraud", "ml", "monitoring"],
-  "templating": { "list": [] },
-  "time": { "from": "now-1h", "to": "now" },
+  "tags": [
+    "fraud",
+    "ml",
+    "monitoring"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "title": "Fraud Detection Dashboard",
   "uid": "fraud-detection-v1",
-  "version": 1
+  "version": 2
 }

@@ -50,9 +50,15 @@ def test_settings_model_dump_is_dict_compatible_with_existing_call_sites(
     dumped = settings.model_dump()
 
     assert dumped["data"]["processed_dir"] == config["data"]["processed_dir"]
-    assert dumped["model"]["xgboost"]["n_estimators"] == config["model"]["xgboost"]["n_estimators"]
+    assert (
+        dumped["model"]["xgboost"]["n_estimators"]
+        == config["model"]["xgboost"]["n_estimators"]
+    )
     assert dumped["model"]["tft"]["device"] == config["model"]["tft"]["device"]
-    assert dumped["imbalance"]["sampling_strategy"] == config["imbalance"]["sampling_strategy"]
+    assert (
+        dumped["imbalance"]["sampling_strategy"]
+        == config["imbalance"]["sampling_strategy"]
+    )
 
 
 def test_load_settings_reads_real_config_file(project_root) -> None:
@@ -78,6 +84,61 @@ def test_load_settings_is_cached(project_root) -> None:
     assert first is second
 
 
+# ── Env-var overrides (docker-compose topology) ──────────────────────────────
+
+
+class TestKafkaBootstrapEnvOverride:
+    """`docker-compose.yml` sets `KAFKA_BOOTSTRAP_SERVERS=kafka:9092`, but
+    `load_settings` read only `config.yaml`'s `localhost:9092`, so the
+    in-process Kafka consumer could not reach the broker under compose and
+    `/health` showed `kafka_consumer_running: false`. The override lets the
+    compose env win without committing a container hostname to config.yaml."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_cache_and_env(self, monkeypatch):
+        # load_settings is @cache'd; clear it around each test so the env is
+        # actually re-read, and ensure the var starts unset.
+        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+        load_settings.cache_clear()
+        yield
+        load_settings.cache_clear()
+
+    def test_unset_env_leaves_the_yaml_value(self, project_root):
+        settings = load_settings(str(project_root / "config" / "config.yaml"))
+        assert settings.kafka.bootstrap_servers == "localhost:9092"
+
+    def test_set_env_overrides_the_yaml_value(self, project_root, monkeypatch):
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+        settings = load_settings(str(project_root / "config" / "config.yaml"))
+        assert settings.kafka.bootstrap_servers == "kafka:9092"
+
+    def test_blank_env_is_ignored(self, project_root, monkeypatch):
+        """An empty or whitespace-only value must not blank out the config."""
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "   ")
+        settings = load_settings(str(project_root / "config" / "config.yaml"))
+        assert settings.kafka.bootstrap_servers == "localhost:9092"
+
+    def test_override_only_touches_the_named_field(self, project_root, monkeypatch):
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+        settings = load_settings(str(project_root / "config" / "config.yaml"))
+        # Other kafka fields come straight from config.yaml, unchanged.
+        assert settings.kafka.input_topic == "transactions"
+        assert settings.kafka.output_topic == "fraud_alerts"
+
+    def test_config_hash_reflects_the_effective_value(self, project_root, monkeypatch):
+        """A manifest's config_hash must record the broker the process actually
+        used, so two deployments with different brokers are not conflated."""
+        from src.config import config_hash
+
+        base = config_hash(load_settings(str(project_root / "config" / "config.yaml")))
+        load_settings.cache_clear()
+        monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+        overridden = config_hash(
+            load_settings(str(project_root / "config" / "config.yaml"))
+        )
+        assert base != overridden
+
+
 def test_settings_instance_is_frozen(config: Dict[str, Any]) -> None:
     """The cached Settings singleton must be immutable: since load_settings()
     hands the same object to every caller, an accidental direct mutation
@@ -100,7 +161,9 @@ def test_missing_required_key_raises_validation_error(config: Dict[str, Any]) ->
         Settings.model_validate(broken)
 
 
-def test_missing_top_level_section_raises_validation_error(config: Dict[str, Any]) -> None:
+def test_missing_top_level_section_raises_validation_error(
+    config: Dict[str, Any]
+) -> None:
     broken = copy.deepcopy(config)
     del broken["kafka"]
 
@@ -117,7 +180,9 @@ def test_wrong_type_raises_validation_error(config: Dict[str, Any]) -> None:
         Settings.model_validate(broken)
 
 
-def test_wrong_type_for_random_seed_raises_validation_error(config: Dict[str, Any]) -> None:
+def test_wrong_type_for_random_seed_raises_validation_error(
+    config: Dict[str, Any]
+) -> None:
     broken = copy.deepcopy(config)
     broken["project"]["random_seed"] = "forty-two"
 
@@ -168,7 +233,9 @@ def test_valid_device_values_accepted(config: Dict[str, Any], good_device: str) 
     assert settings.model.tft.device == good_device
 
 
-def test_bad_imbalance_sampling_strategy_raises_validation_error(config: Dict[str, Any]) -> None:
+def test_bad_imbalance_sampling_strategy_raises_validation_error(
+    config: Dict[str, Any]
+) -> None:
     broken = copy.deepcopy(config)
     broken["imbalance"]["sampling_strategy"] = "not_a_real_strategy"
 

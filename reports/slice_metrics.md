@@ -1,8 +1,8 @@
 # Slice Metrics — Validation Split
 
-Threshold: `0.0004` (recomputed on validation (no frozen threshold in artifact); cost model: cost_fn=500, cost_fp=5, revenue_tp=480)
+Threshold: `0.0004` (frozen (model artifact); cost model: cost_fn=500, cost_fp=5, revenue_tp=480)
 
-Model: `models/xgb_model.pkl` | Rows: 59053 | Fraud rate: 0.0349
+Model: `models/xgb_model.*` | Rows: 59053 | Fraud rate: 0.0349
 
 Rows flagged `reliable=False` have fewer than 30 validation examples — treat their metrics as directional, not conclusive.
 

@@ -1,25 +1,91 @@
 {
   "split_used_for_selection": "validation",
   "note": "Test split was never loaded by this script; selection is based on val_pr_auc only.",
-  "winner": "scale_pos_weight",
+  "winner": "spw_1.0 (none)",
   "results": {
     "scale_pos_weight": {
-      "time_s": 3.5359044075012207,
-      "val_pr_auc": 0.6037829161486565,
-      "val_best_f1": 0.5859229747675964,
-      "val_f1_threshold": 0.843608021736145
+      "time_s": 5.914836645126343,
+      "val_pr_auc": 0.5679698582347867,
+      "val_best_f1": 0.5458057395143487,
+      "val_f1_threshold": 0.7905173301696777
     },
     "SMOTE": {
-      "time_s": 7.206533432006836,
-      "val_pr_auc": 0.579936573100158,
-      "val_best_f1": 0.5622681505034446,
-      "val_f1_threshold": 0.45266780257225037
+      "time_s": 12.588858366012573,
+      "val_pr_auc": 0.5337826776251366,
+      "val_best_f1": 0.5170546832701679,
+      "val_f1_threshold": 0.5404808521270752
     },
     "SMOTE + scale_pos_weight": {
-      "time_s": 7.070449113845825,
-      "val_pr_auc": 0.5591747170788082,
-      "val_best_f1": 0.5521235521235521,
-      "val_f1_threshold": 0.9437731504440308
+      "time_s": 11.637450933456421,
+      "val_pr_auc": 0.5342850836086956,
+      "val_best_f1": 0.5168770935325947,
+      "val_f1_threshold": 0.9275684356689453
+    },
+    "spw_1.0 (none)": {
+      "time_s": 6.514977931976318,
+      "val_pr_auc": 0.5906674150873701,
+      "val_best_f1": 0.5782537067545305,
+      "val_f1_threshold": 0.22038361430168152
+    },
+    "spw_7.25 (25%)": {
+      "time_s": 5.890322208404541,
+      "val_pr_auc": 0.5784403395258791,
+      "val_best_f1": 0.5608671484157864,
+      "val_f1_threshold": 0.5948610901832581
+    },
+    "spw_14.5 (50%)": {
+      "time_s": 6.602627515792847,
+      "val_pr_auc": 0.5726418152875576,
+      "val_best_f1": 0.5625493810903344,
+      "val_f1_threshold": 0.6672293543815613
+    },
+    "spw_21.75 (75%)": {
+      "time_s": 6.690876007080078,
+      "val_pr_auc": 0.5647694281238398,
+      "val_best_f1": 0.554922279792746,
+      "val_f1_threshold": 0.7297272682189941
+    },
+    "spw_29 (100%, current)": {
+      "time_s": 6.447765588760376,
+      "val_pr_auc": 0.5648145015216766,
+      "val_best_f1": 0.5566343042071198,
+      "val_f1_threshold": 0.7890300750732422
+    }
+  },
+  "scale_pos_weight_grid": {
+    "config_value": 29.0,
+    "winner_by_val_pr_auc": "spw_1.0 (none)",
+    "results": {
+      "spw_1.0 (none)": {
+        "time_s": 6.514977931976318,
+        "val_pr_auc": 0.5906674150873701,
+        "val_best_f1": 0.5782537067545305,
+        "val_f1_threshold": 0.22038361430168152
+      },
+      "spw_7.25 (25%)": {
+        "time_s": 5.890322208404541,
+        "val_pr_auc": 0.5784403395258791,
+        "val_best_f1": 0.5608671484157864,
+        "val_f1_threshold": 0.5948610901832581
+      },
+      "spw_14.5 (50%)": {
+        "time_s": 6.602627515792847,
+        "val_pr_auc": 0.5726418152875576,
+        "val_best_f1": 0.5625493810903344,
+        "val_f1_threshold": 0.6672293543815613
+      },
+      "spw_21.75 (75%)": {
+        "time_s": 6.690876007080078,
+        "val_pr_auc": 0.5647694281238398,
+        "val_best_f1": 0.554922279792746,
+        "val_f1_threshold": 0.7297272682189941
+      },
+      "spw_29 (100%, current)": {
+        "time_s": 6.447765588760376,
+        "val_pr_auc": 0.5648145015216766,
+        "val_best_f1": 0.5566343042071198,
+        "val_f1_threshold": 0.7890300750732422
+      }
     }
   }
 }

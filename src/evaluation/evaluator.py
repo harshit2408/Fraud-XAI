@@ -211,6 +211,102 @@ class ModelEvaluator:
             "accuracy": float(accuracy),
         }
 
+    def precision_at_recall(
+        self, y_true: np.ndarray, y_prob: np.ndarray, target_recall: float
+    ) -> Dict[str, float]:
+        """Precision at the highest decision threshold that still reaches
+        `target_recall` (PRD Phase 9, step 9.0).
+
+        `compute_metrics_at_threshold` answers "what is precision/recall at
+        threshold t"; `find_optimal_threshold` answers "which t maximises net
+        business value". Neither answers the question Phase 9 is scoped
+        against — "if we require at least 80% recall, what precision do we
+        get, and at what threshold" — which is what this method is for.
+
+        Walks `sklearn.metrics.precision_recall_curve` (whose points are
+        ordered by increasing threshold, i.e. decreasing recall) and returns
+        the point with the *largest* threshold whose recall is still
+        `>= target_recall` — i.e. precision at the operating point you would
+        deploy if recall were pinned at exactly this floor.
+
+        This is the standard reading of "precision at recall R". Note the
+        naive alternative — the *first* point at or above `target_recall`,
+        which is the highest-recall (lowest-threshold) qualifying point — is
+        deliberately not used: on the sklearn curve that point is the
+        recall-1.0 corner for every floor, which collapses all recall
+        targets to the same precision and answers nothing.
+
+        precision along the PR curve is sawtoothed, not monotone, so the
+        returned value is neither the minimum nor the maximum precision
+        among constraint-satisfying points — it is precision at one
+        specific, well-defined threshold (the tightest one meeting the
+        floor). Do not read it as a guaranteed lower bound.
+
+        Args:
+            y_true: Ground-truth binary labels.
+            y_prob: Predicted fraud probabilities (same length as `y_true`).
+            target_recall: Recall floor in [0, 1] (e.g. 0.80 for "at least
+                80% of fraud caught").
+
+        Returns:
+            dict with:
+              - ``target_recall``: the requested floor, echoed back
+              - ``achieved_recall``: recall at the returned point (>= floor)
+              - ``precision``: precision at the returned point
+              - ``threshold``: the decision threshold that achieves it
+              - ``f1``: harmonic mean of the returned precision/recall
+
+        Raises:
+            ValueError: `target_recall` is outside [0, 1]; `y_true` has no
+                positive labels (recall undefined); or no threshold on the
+                curve reaches `target_recall`.
+        """
+        if not 0.0 <= target_recall <= 1.0:
+            raise ValueError(
+                f"target_recall must be in [0, 1], got {target_recall}"
+            )
+
+        y_true = np.asarray(y_true)
+        y_prob = np.asarray(y_prob)
+        if y_true.sum() == 0:
+            raise ValueError(
+                "precision_at_recall: y_true has no positive labels — recall "
+                "is undefined."
+            )
+
+        # precision_recall_curve returns precision/recall of length n+1 and
+        # thresholds of length n; the trailing (precision=1, recall=0) point
+        # has no corresponding threshold. Drop it so every point considered
+        # has a real threshold to report.
+        precision, recall, thresholds = precision_recall_curve(y_true, y_prob)
+        precision = precision[:-1]
+        recall = recall[:-1]
+
+        meets = recall >= target_recall
+        if not meets.any():
+            raise ValueError(
+                f"precision_at_recall: no threshold reaches recall "
+                f"{target_recall:.4f}; the maximum achievable recall on this "
+                f"curve is {recall.max():.4f}."
+            )
+
+        # `recall` from precision_recall_curve is non-increasing as the
+        # threshold increases, so the qualifying points form a prefix of the
+        # array; its last index is the largest threshold that still meets the
+        # floor. (precision is NOT monotone here — see the docstring — so
+        # this picks the tightest constraint-satisfying operating point, not
+        # a precision extremum.)
+        idx = int(np.flatnonzero(meets)[-1])
+        p = float(precision[idx])
+        r = float(recall[idx])
+        return {
+            "target_recall": float(target_recall),
+            "achieved_recall": r,
+            "precision": p,
+            "threshold": float(thresholds[idx]),
+            "f1": (2 * p * r / (p + r)) if (p + r) > 0 else 0.0,
+        }
+
     def plot_pr_curve(self, y_true: np.ndarray, y_prob: np.ndarray, model_name: str, save_path: str) -> None:
         """PR curve with AUC in legend."""
         precision, recall, _ = precision_recall_curve(y_true, y_prob)

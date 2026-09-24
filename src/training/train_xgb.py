@@ -2,7 +2,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import joblib
 import mlflow
@@ -19,6 +19,7 @@ from src.config import Settings, load_settings
 from src.device import resolve_device
 from src.evaluation.evaluator import ModelEvaluator
 from src.training.manifest import build_manifest, write_manifest
+from src.training.run_logging import RunLogger
 from src.utils.checksums import verify_checksums, write_checksums
 from src.utils.seed import set_seed
 
@@ -27,6 +28,59 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def resolve_scale_pos_weight(
+    config: Dict[str, Any], neg_count: int, pos_count: int, model_key: str = "xgboost"
+) -> float:
+    """The `scale_pos_weight` to train with: a positive `config.model.<model_key>.
+    scale_pos_weight` if set, else the empirical `neg / pos` ratio.
+
+    PRD Phase 9 P9-3 sweeps this to trade recall for precision, so a set
+    config value must win. Historically both GBDT trainers ignored the config
+    key entirely and always used the runtime ratio (the config comment even
+    said "set to (neg_count / pos_count) at runtime"); an absent or
+    non-positive value preserves exactly that behaviour.
+    """
+    if pos_count <= 0:
+        raise ValueError("resolve_scale_pos_weight: pos_count must be > 0.")
+    cfg_spw = config.get("model", {}).get(model_key, {}).get("scale_pos_weight")
+    if isinstance(cfg_spw, (int, float)) and not isinstance(cfg_spw, bool) and cfg_spw > 0:
+        return float(cfg_spw)
+    return neg_count / pos_count
+
+
+class TensorBoardCheckpointCallback(xgb.callback.TrainingCallback):
+    """
+    XGBoost training callback: streams every eval-set metric to TensorBoard
+    each boosting round, and periodically checkpoints the in-progress
+    booster (not just the final model `XGBTrainer.save()` writes at the end)
+    so a killed or crashed run leaves an inspectable, resumable trail.
+
+    Closes part of finding F2's fix (mid-training visibility and
+    checkpoints) applied consistently across every trainer, not just the
+    one that also lacked a manifest.
+    """
+
+    def __init__(self, run_logger: RunLogger, checkpoint_every: int = 50, keep_last: int = 3):
+        self.run_logger = run_logger
+        self.checkpoint_every = checkpoint_every
+        self.keep_last = keep_last
+
+    def after_iteration(self, model, epoch: int, evals_log) -> bool:
+        metrics = {
+            f"{dataset_name}/{metric_name}": values[-1]
+            for dataset_name, metric_dict in evals_log.items()
+            for metric_name, values in metric_dict.items()
+        }
+        self.run_logger.log_scalars(metrics, step=epoch)
+
+        if self.checkpoint_every and (epoch + 1) % self.checkpoint_every == 0:
+            ckpt_path = self.run_logger.checkpoint_path(epoch, suffix="ubj")
+            model.save_model(str(ckpt_path))
+            self.run_logger.prune_checkpoints(keep_last=self.keep_last)
+
+        return False  # never request early stop from here — that's early_stopping_rounds' job
 
 
 def _artifact_paths(base_path: Path) -> Dict[str, Path]:
@@ -94,22 +148,31 @@ class XGBTrainer:
         self.model = xgb.XGBClassifier(**xgb_cfg)
         return self.model
 
-    def train(self, X_train: pd.DataFrame, y_train: pd.Series, X_val: pd.DataFrame, y_val: pd.Series) -> None:
+    def train(
+        self,
+        X_train: pd.DataFrame,
+        y_train: pd.Series,
+        X_val: pd.DataFrame,
+        y_val: pd.Series,
+        run_logger: Optional[RunLogger] = None,
+    ) -> None:
         if self.model is None:
             raise ValueError("Model not built. Call build_model() first.")
-            
+
         self.feature_names = list(X_train.columns)
-        
+
         logger.info(f"Training XGBoost with {len(X_train)} train rows, {len(X_val)} val rows.")
-        
-        # XGBClassifier handles early stopping natively when eval_set is provided
-        self.model.fit(
-            X_train,
-            y_train,
+
+        fit_kwargs: Dict[str, Any] = dict(
             eval_set=[(X_train, y_train), (X_val, y_val)],
             verbose=50,
         )
-        
+        if run_logger is not None:
+            fit_kwargs["callbacks"] = [TensorBoardCheckpointCallback(run_logger)]
+
+        # XGBClassifier handles early stopping natively when eval_set is provided
+        self.model.fit(X_train, y_train, **fit_kwargs)
+
         logger.info(f"Training complete. Best iteration: {self.model.best_iteration}")
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
@@ -322,24 +385,32 @@ def main() -> None:
     X_test = pd.read_parquet(processed_dir / "test_features.parquet")
     y_test = pd.read_parquet(processed_dir / "test_labels.parquet").squeeze()
     
-    # Calculate scale_pos_weight
-    neg_count = (y_train == 0).sum()
-    pos_count = (y_train == 1).sum()
-    scale_pos_weight = neg_count / pos_count
-    logger.info(f"Class imbalance: {neg_count} neg / {pos_count} pos -> scale_pos_weight = {scale_pos_weight:.2f}")
+    # scale_pos_weight: config override, else the empirical neg/pos ratio.
+    neg_count = int((y_train == 0).sum())
+    pos_count = int((y_train == 1).sum())
+    scale_pos_weight = resolve_scale_pos_weight(config, neg_count, pos_count)
+    logger.info(
+        "Class imbalance: %d neg / %d pos (ratio %.2f) -> scale_pos_weight = %.4f",
+        neg_count,
+        pos_count,
+        neg_count / pos_count,
+        scale_pos_weight,
+    )
 
     # Set up MLflow
     mlflow_cfg = config.get("mlflow", {})
     mlflow.set_tracking_uri(mlflow_cfg.get("tracking_uri", "http://localhost:5000"))
     mlflow.set_experiment(mlflow_cfg.get("experiment_name", "fraud_detection"))
     
-    with mlflow.start_run(run_name="xgb_enhanced_features") as run:
+    with mlflow.start_run(run_name="xgb_enhanced_features") as run, RunLogger(
+        run_type="xgboost", run_name=f"xgb_{run.info.run_id[:8]}"
+    ) as run_logger:
         run_id = run.info.run_id
         logger.info(f"MLflow run ID: {run_id}")
 
         trainer = XGBTrainer(config)
         trainer.build_model(scale_pos_weight=scale_pos_weight)
-        
+
         # Log params
         xgb_params = trainer.model.get_params()
         mlflow.log_params({k: v for k, v in xgb_params.items() if v is not None})
@@ -351,9 +422,11 @@ def main() -> None:
         mlflow.log_param("feature_count", len(X_train.columns))
         # Phase D3: which source supplied the hyperparameters this run used.
         mlflow.log_param("tuned_params_source", tuned_params_source)
+        mlflow.log_param("tensorboard_log_dir", str(run_logger.log_dir))
+        mlflow.log_param("checkpoint_dir", str(run_logger.checkpoint_dir))
 
         # Train with validation set for early stopping
-        trainer.train(X_train, y_train, X_val, y_val)
+        trainer.train(X_train, y_train, X_val, y_val, run_logger=run_logger)
         
         # Evaluate on all splits for overfitting analysis
         logger.info("Evaluating on all splits...")

@@ -121,7 +121,9 @@ def main() -> None:
     obj_cols = X_train.select_dtypes(include=["object"]).columns
     X_train = X_train.drop(columns=obj_cols)
     X_val = X_val.drop(columns=obj_cols)
-    logger.info(f"Dropped {len(obj_cols)} object columns. Remaining: {X_train.shape[1]}")
+    logger.info(
+        f"Dropped {len(obj_cols)} object columns. Remaining: {X_train.shape[1]}"
+    )
 
     # Fill NaN for SMOTE (XGBoost tolerates NaN natively, but SMOTE's
     # nearest-neighbor search does not).
@@ -138,7 +140,11 @@ def main() -> None:
 
     # 1. scale_pos_weight only
     results["scale_pos_weight"] = train_and_eval(
-        "scale_pos_weight only", X_train, y_train, X_val, y_val,
+        "scale_pos_weight only",
+        X_train,
+        y_train,
+        X_val,
+        y_val,
         scale_pos_weight=scale_weight,
     )
 
@@ -147,10 +153,17 @@ def main() -> None:
     start_smote = time.time()
     smote = SMOTE(k_neighbors=5, random_state=42)
     X_res, y_res = smote.fit_resample(X_train, y_train)
-    logger.info(f"SMOTE finished in {time.time() - start_smote:.2f}s. New shape: {X_res.shape}")
+    logger.info(
+        f"SMOTE finished in {time.time() - start_smote:.2f}s. New shape: {X_res.shape}"
+    )
 
     results["SMOTE"] = train_and_eval(
-        "SMOTE only", X_res, y_res, X_val, y_val, scale_pos_weight=1.0,
+        "SMOTE only",
+        X_res,
+        y_res,
+        X_val,
+        y_val,
+        scale_pos_weight=1.0,
     )
 
     # 3. SMOTE + scale_pos_weight. After SMOTE, the resampled classes are
@@ -160,9 +173,35 @@ def main() -> None:
     # `scale_weight` computed from the pre-SMOTE class ratio above rather
     # than an unexplained magic constant.
     results["SMOTE + scale_pos_weight"] = train_and_eval(
-        f"SMOTE + scale_pos_weight={scale_weight:.2f}", X_res, y_res, X_val, y_val,
+        f"SMOTE + scale_pos_weight={scale_weight:.2f}",
+        X_res,
+        y_res,
+        X_val,
+        y_val,
         scale_pos_weight=scale_weight,
     )
+
+    # 4. PRD Phase 9 P9-3: scale_pos_weight grid, no resampling. The config
+    # ships scale_pos_weight=29 (a recall-favouring setting). P9-3 asks
+    # whether *reducing* it improves precision at a recall-preserving
+    # operating point — swept at fractions of the config value plus 1.0
+    # (no class weighting at all, the pure "class-weighting alone" end).
+    # This arm exists to give the ablation notebook the evidence FR-05's
+    # SMOTE requirement is weighed against, rather than assuming a benefit.
+    CONFIG_SPW = 29.0
+    spw_grid = {
+        "spw_1.0 (none)": 1.0,
+        "spw_7.25 (25%)": CONFIG_SPW * 0.25,
+        "spw_14.5 (50%)": CONFIG_SPW * 0.5,
+        "spw_21.75 (75%)": CONFIG_SPW * 0.75,
+        "spw_29 (100%, current)": CONFIG_SPW,
+    }
+    spw_results = {}
+    for label, spw in spw_grid.items():
+        spw_results[label] = train_and_eval(
+            label, X_train, y_train, X_val, y_val, scale_pos_weight=spw
+        )
+    results.update(spw_results)
 
     logger.info("\n--- Final Results (validation split) ---")
     df = pd.DataFrame(results).T
@@ -170,6 +209,13 @@ def main() -> None:
 
     winner = df["val_pr_auc"].idxmax()
     logger.info(f"\nWinner (by validation PR-AUC): {winner}")
+    spw_df = pd.DataFrame(spw_results).T
+    spw_winner = spw_df["val_pr_auc"].idxmax()
+    logger.info(
+        "scale_pos_weight grid winner (val PR-AUC): %s | best val F1: %s",
+        spw_winner,
+        spw_df["val_best_f1"].idxmax(),
+    )
 
     REPORTS_DIR.mkdir(exist_ok=True)
     output = {
@@ -177,6 +223,11 @@ def main() -> None:
         "note": "Test split was never loaded by this script; selection is based on val_pr_auc only.",
         "winner": winner,
         "results": results,
+        "scale_pos_weight_grid": {
+            "config_value": CONFIG_SPW,
+            "winner_by_val_pr_auc": spw_winner,
+            "results": spw_results,
+        },
     }
     out_path = REPORTS_DIR / "imbalance_ablation_results.json"
     with open(out_path, "w") as f:

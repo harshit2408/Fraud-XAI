@@ -46,6 +46,7 @@ from src.evaluation.evaluator import ModelEvaluator
 from src.models.tft_model import TemporalFusionTransformer
 from src.training.losses import FocalLoss, WeightedBCELoss
 from src.training.manifest import build_manifest, write_manifest
+from src.training.run_logging import RunLogger
 from src.utils.checksums import verify_checksums, write_checksums
 from src.utils.seed import set_seed
 
@@ -326,6 +327,27 @@ class TFTTrainer:
 
         logger.info(f"Building {split_name} sequences...")
         seq_data = self.sequence_builder.build_sequences(X, y, fit_scaler=fit_scaler)
+
+        # `build_sequences` re-runs `_identify_features` and overwrites
+        # `_feature_dim` from whatever numeric columns the frame carries. When
+        # scoring with a loaded model that must equal the width the model's
+        # first Linear layer was built for — otherwise the mismatch surfaces
+        # as an opaque shape error deep in the forward pass. PRD Phase 9 P9-2
+        # relies on `SequenceBuilder` dropping `uid_*`; assert the result
+        # rather than trust the prefix match silently (mle-reviewer M4).
+        if not fit_scaler and self.model is not None:
+            trained = int(getattr(self.model, "num_numeric_features", 0))
+            got = int(self.sequence_builder._feature_dim)
+            if trained and got != trained:
+                raise ValueError(
+                    f"TFT feature-dim drift at {split_name}: the loaded model "
+                    f"expects {trained} time-varying numeric features but this "
+                    f"frame yields {got}. A feature column was added/removed/"
+                    f"retyped without retraining the TFT (see "
+                    f"SequenceBuilder._identify_features and its uid_* "
+                    f"exclusion)."
+                )
+
         n_seq = len(seq_data["mask"])
         if seq_data.get("targets") is not None:
             logger.info(
@@ -452,6 +474,7 @@ class TFTTrainer:
         X_val: pd.DataFrame,
         y_val: pd.Series,
         trial: Optional[optuna.Trial] = None,
+        run_logger: Optional[RunLogger] = None,
     ) -> Dict[str, list]:
         """
         Full training loop with early stopping on validation PR-AUC.
@@ -472,10 +495,26 @@ class TFTTrainer:
 
         # Build sequences once over train+val so val's first transactions per
         # card retain real train history instead of being padded at the
-        # split boundary (Phase B6). Scaler is fit once, on train only.
+        # split boundary (Phase B6).
+        #
+        # 2026-09-09 fix (4-agent ML review, ecc:code-reviewer): the scaler
+        # must be fit on train only, but `_build_sequences_for_splits` builds
+        # sequences over the train+val CONCATENATION for the history-
+        # continuity reason above — passing `fit_scaler=True` straight
+        # through used to fit the QuantileTransformer on that combined
+        # frame, leaking val's (temporally later) distribution into its own
+        # transform. Fit explicitly on X_train first, then build the
+        # combined sequences with `fit_scaler=False` so both splits are
+        # transformed with the already-fitted, train-only scaler.
+        if self.sequence_builder is None:
+            seq_len = self.config["data"].get("sequence_length", 10)
+            self.sequence_builder = SequenceBuilder(
+                sequence_length=seq_len, group_col="card1"
+            )
+        self.sequence_builder.fit_scaler_on(X_train)
         split_seqs = self._build_sequences_for_splits(
             [("train", X_train, y_train), ("val", X_val, y_val)],
-            fit_scaler=True,
+            fit_scaler=False,
         )
         train_seq = split_seqs["train"]
         val_seq = split_seqs["val"]
@@ -494,10 +533,16 @@ class TFTTrainer:
         val_loader = self._create_dataloader(val_seq, batch_size, shuffle=False)
 
         # Optimizer and scheduler
+        # PRD Phase 9 P9-6: weight_decay is config-driven. At the previous
+        # hardcoded 1e-5 AdamW's decay term is effectively off, which left
+        # dropout as the only regulariser on a model measured at train PR-AUC
+        # 0.9519 against val 0.4975. The default preserves the old value, so an
+        # unconfigured run is unchanged.
+        weight_decay = float(tft_cfg.get("weight_decay", 1e-5))
         optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=lr,
-            weight_decay=1e-5,
+            weight_decay=weight_decay,
         )
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
@@ -535,6 +580,10 @@ class TFTTrainer:
         logger.info("STARTING TFT TRAINING")
         logger.info(f"  Epochs: {max_epochs}, Batch size: {batch_size}")
         logger.info(f"  Learning rate: {lr}, Patience: {patience}")
+        logger.info(
+            f"  Regularisation: dropout={tft_cfg.get('dropout')}, "
+            f"weight_decay={weight_decay}, sampler={use_sampler}"
+        )
         logger.info(f"  Device: {self.device}, AMP: {use_amp}")
         logger.info(f"  Train sequences: {len(train_seq['targets']):,}")
         logger.info(f"  Val sequences: {len(val_seq['targets']):,}")
@@ -628,6 +677,21 @@ class TFTTrainer:
                     step=epoch,
                 )
 
+            # Log to TensorBoard (mirrors the MLflow metrics above so both
+            # backends agree — `tensorboard --logdir runs/` for live curves
+            # during a long run, MLflow for cross-run comparison afterward).
+            if run_logger is not None:
+                run_logger.log_scalars(
+                    {
+                        "train/loss": train_loss,
+                        "val/loss": val_loss,
+                        "train/pr_auc": train_pr_auc,
+                        "val/pr_auc": val_pr_auc,
+                        "lr": current_lr,
+                    },
+                    step=epoch,
+                )
+
             # Early stopping check
             if val_pr_auc > best_val_pr_auc:
                 best_val_pr_auc = val_pr_auc
@@ -637,6 +701,17 @@ class TFTTrainer:
                     k: v.cpu().clone() for k, v in self.model.state_dict().items()
                 }
                 logger.info(f"  ★ New best Val PR-AUC: {best_val_pr_auc:.4f}")
+
+                # Checkpoint every new-best epoch (not just the final model
+                # TFTTrainer.save() writes at the end) — early stopping's
+                # own cadence IS the natural checkpoint cadence here, since
+                # every improvement is a point worth being able to resume
+                # from or inspect. keep_last=3 bounds disk usage to the
+                # three most recent bests.
+                if run_logger is not None:
+                    ckpt_path = run_logger.checkpoint_path(epoch, suffix="pt")
+                    torch.save(self._best_model_state, ckpt_path)
+                    run_logger.prune_checkpoints(keep_last=3)
             else:
                 epochs_without_improvement += 1
                 if epochs_without_improvement >= patience:
@@ -1012,7 +1087,9 @@ def main() -> None:
     mlflow.set_tracking_uri(mlflow_cfg.get("tracking_uri", "file:./mlruns"))
     mlflow.set_experiment(mlflow_cfg.get("experiment_name", "fraud_detection"))
 
-    with mlflow.start_run(run_name="tft_sequential_model") as run:
+    with mlflow.start_run(run_name="tft_sequential_model") as run, RunLogger(
+        run_type="tft", run_name=f"tft_{run.info.run_id[:8]}"
+    ) as run_logger:
         run_id = run.info.run_id
         logger.info(f"MLflow run ID: {run_id}")
 
@@ -1027,6 +1104,8 @@ def main() -> None:
 
         # Log params
         tft_cfg = config.get("model", {}).get("tft", {})
+        mlflow.log_param("tensorboard_log_dir", str(run_logger.log_dir))
+        mlflow.log_param("checkpoint_dir", str(run_logger.checkpoint_dir))
         mlflow.log_params({
             "model_type": "TFT",
             "hidden_size": tft_cfg.get("hidden_size", 64),
@@ -1049,7 +1128,7 @@ def main() -> None:
         })
 
         # Train
-        history = trainer.train(X_train, y_train, X_val, y_val)
+        history = trainer.train(X_train, y_train, X_val, y_val, run_logger=run_logger)
 
         # Evaluate on all splits
         logger.info("=" * 60)

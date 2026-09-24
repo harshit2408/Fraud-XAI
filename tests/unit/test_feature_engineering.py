@@ -94,12 +94,12 @@ def test_split_sizes_respect_ratio(raw_df: pd.DataFrame) -> None:
     total = len(raw_df)
     expected_train = int(total * 0.80)
 
-    assert abs(len(X_train) - expected_train) <= 2, (
-        f"Train set size {len(X_train)} deviates from expected ~{expected_train}"
-    )
-    assert len(X_train) + len(X_test) == total, (
-        "Train + test rows must sum to total rows (no rows dropped or duplicated)"
-    )
+    assert (
+        abs(len(X_train) - expected_train) <= 2
+    ), f"Train set size {len(X_train)} deviates from expected ~{expected_train}"
+    assert (
+        len(X_train) + len(X_test) == total
+    ), "Train + test rows must sum to total rows (no rows dropped or duplicated)"
 
 
 # ─── Temporal feature tests ───────────────────────────────────────────────────
@@ -114,18 +114,21 @@ def test_temporal_features_created(raw_df: pd.DataFrame) -> None:
     result = fe.create_temporal_features(raw_df.copy())
 
     expected_cols = [
-        "hour_of_day", "day_of_week",
-        "hour_sin", "hour_cos",
-        "day_sin", "day_cos",
+        "hour_of_day",
+        "day_of_week",
+        "hour_sin",
+        "hour_cos",
+        "day_sin",
+        "day_cos",
     ]
     for col in expected_cols:
         assert col in result.columns, f"Missing expected temporal column: '{col}'"
 
     # Cyclical features must be in [-1, 1] range (sin/cos bounded)
     for cyc_col in ["hour_sin", "hour_cos", "day_sin", "day_cos"]:
-        assert result[cyc_col].between(-1.0, 1.0).all(), (
-            f"Cyclical feature '{cyc_col}' has values outside [-1, 1]"
-        )
+        assert (
+            result[cyc_col].between(-1.0, 1.0).all()
+        ), f"Cyclical feature '{cyc_col}' has values outside [-1, 1]"
 
 
 # ─── Amount feature tests ─────────────────────────────────────────────────────
@@ -146,9 +149,9 @@ def test_amount_features_created(raw_df: pd.DataFrame) -> None:
     assert (result["amount_log"] >= 0).all(), "amount_log must be >= 0"
 
     # amount_cents is the fractional part: must be in [0, 1)
-    assert result["amount_cents"].between(0.0, 1.0, inclusive="left").all(), (
-        "amount_cents must be in [0.0, 1.0)"
-    )
+    assert (
+        result["amount_cents"].between(0.0, 1.0, inclusive="left").all()
+    ), "amount_cents must be in [0.0, 1.0)"
 
 
 # ─── Missing value tests ──────────────────────────────────────────────────────
@@ -170,9 +173,9 @@ def test_missing_value_handling(raw_df: pd.DataFrame) -> None:
     nan_counts = result.isna().sum()
     cols_with_nan = nan_counts[nan_counts > 0]
 
-    assert len(cols_with_nan) == 0, (
-        f"NaN values remain after handle_missing_values():\n{cols_with_nan}"
-    )
+    assert (
+        len(cols_with_nan) == 0
+    ), f"NaN values remain after handle_missing_values():\n{cols_with_nan}"
 
 
 # ─── Phase A1: Orchestrator-level data-leakage tests ──────────────────────────
@@ -362,13 +365,20 @@ def _run_pipeline_capturing_state(
     The raw loader is replaced with a stub returning *df*, FeatureEngineer is
     replaced with _RecordingFE, and time_based_split_3way is wrapped so the
     ordering of split vs fit calls is recorded in _RecordingFE.call_order.
-    processed_dir is redirected to tmp_path so no repo files are written.
+    processed_dir AND serving.transformer_path are redirected to tmp_path so
+    no repo files are written — run_pipeline's Step 8 dual-writes transformers
+    to serving.transformer_path (default models/transformers/), and without
+    this redirect a synthetic-data test run would overwrite the real serving
+    artifacts.
     """
     _RecordingFE.reset()
 
     # Deep-copy so the session-scoped config fixture is never mutated
     run_cfg = copy.deepcopy(cfg)
     run_cfg["data"]["processed_dir"] = str(tmp_path)
+    run_cfg.setdefault("serving", {})["transformer_path"] = str(
+        tmp_path / "serving_transformers"
+    )
 
     loader = mock.MagicMock()
     loader.load_raw.return_value = df.copy()
@@ -384,7 +394,9 @@ def _run_pipeline_capturing_state(
         return real_split(*args, **kwargs)
 
     with (
-        mock.patch("src.data.preprocess.DataLoader", mock.MagicMock(return_value=loader)),
+        mock.patch(
+            "src.data.preprocess.DataLoader", mock.MagicMock(return_value=loader)
+        ),
         mock.patch("src.data.preprocess.FeatureEngineer", _RecordingFE),
         mock.patch("src.data.preprocess.time_based_split_3way", _spy_split),
     ):
@@ -432,9 +444,7 @@ def test_pipeline_target_mean_not_contaminated_by_holdout_labels(
 
 
 @pytest.mark.unit
-def test_pipeline_pca_not_contaminated_by_holdout_rows(
-    config: dict, tmp_path
-) -> None:
+def test_pipeline_pca_not_contaminated_by_holdout_rows(config: dict, tmp_path) -> None:
     """
     EXPECTED TO FAIL until Phase A2 lands.
 
@@ -451,12 +461,14 @@ def test_pipeline_pca_not_contaminated_by_holdout_rows(
     fe_orig = _run_pipeline_capturing_state(df_orig, config, tmp_path / "orig")
     fe_pert = _run_pipeline_capturing_state(df_pert, config, tmp_path / "pert")
 
-    assert fe_orig._pca is not None, "PCA was not fitted — check V-feature columns in synthetic df"
+    assert (
+        fe_orig._pca is not None
+    ), "PCA was not fitted — check V-feature columns in synthetic df"
     assert fe_pert._pca is not None, "PCA was not fitted on perturbed frame"
 
-    assert fe_orig._pca.components_.shape == fe_pert._pca.components_.shape, (
-        "PCA component shapes differ — unexpected structural change."
-    )
+    assert (
+        fe_orig._pca.components_.shape == fe_pert._pca.components_.shape
+    ), "PCA component shapes differ — unexpected structural change."
 
     np.testing.assert_allclose(
         fe_orig._pca.components_,
@@ -734,7 +746,9 @@ def test_partial_fit_batches_never_yields_a_short_batch(
     )
     reassembled = np.concatenate(batches)
     np.testing.assert_array_equal(
-        reassembled, positions, err_msg="Batches must partition positions exactly once, in order."
+        reassembled,
+        positions,
+        err_msg="Batches must partition positions exactly once, in order.",
     )
 
 
@@ -938,9 +952,9 @@ def test_card_aggregates_are_zero_on_a_cards_first_transaction(
     result = FeatureEngineer().create_card_aggregates(card_history_df.copy())
     first_rows = result.groupby("card1", sort=False).head(1)
 
-    assert len(first_rows) == card_history_df["card1"].nunique(), (
-        "Expected one first-transaction row per card."
-    )
+    assert (
+        len(first_rows) == card_history_df["card1"].nunique()
+    ), "Expected one first-transaction row per card."
 
     for col in CARD_HISTORY_COLS:
         offenders = first_rows.loc[first_rows[col] != 0.0, ["card1", col]]
@@ -972,9 +986,9 @@ def test_card_aggregates_ignore_a_change_to_the_rows_own_amount(
     later_same_card = card_history_df.index[
         (card_history_df["card1"] == same_card) & (card_history_df.index > target_idx)
     ]
-    assert len(later_same_card) > 0, (
-        "Fixture must place at least one later transaction on the perturbed card."
-    )
+    assert (
+        len(later_same_card) > 0
+    ), "Fixture must place at least one later transaction on the perturbed card."
 
     for col in CARD_HISTORY_COLS:
         assert baseline.loc[target_idx, col] == pytest.approx(
@@ -1070,6 +1084,112 @@ def test_target_encoding_excludes_the_current_rows_label(
     )
 
 
+def _naive_target_encoding_lagged(
+    df: pd.DataFrame,
+    col: str,
+    prior: float,
+    weight: float,
+    time_col: str,
+    lag_seconds: float,
+) -> np.ndarray:
+    """
+    Oracle for the lag-aware branch of create_target_encoding (finding F6):
+    smoothed mean of labels on rows sharing the same entity whose OWN
+    `time_col` is at least `lag_seconds` earlier than the row being encoded
+    — not merely "earlier in the frame", which is all `_naive_target_encoding`
+    above checks.
+    """
+    seen: dict[Any, list[tuple[float, int]]] = {}
+    encoded = []
+
+    for key, label, t in zip(df[col], df["isFraud"], df[time_col]):
+        history = seen.setdefault(_group_key(key), [])
+        eligible = [lbl for (ts, lbl) in history if ts <= t - lag_seconds]
+        count = len(eligible)
+        if count == 0:
+            encoded.append(prior)
+        else:
+            encoded.append((sum(eligible) + weight * prior) / (count + weight))
+        history.append((float(t), int(label)))
+
+    return np.asarray(encoded, dtype=float)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("col", ["card1", "addr1"])
+def test_target_encoding_with_label_lag_excludes_recent_same_window_history(
+    card_history_df: pd.DataFrame, col: str
+) -> None:
+    """
+    Finding F6 (2026-08-19 metrics audit): with label_lag_seconds > 0, a
+    row's encoding must only reflect entity history old enough to plausibly
+    be labeled by the time the row is scored — not merely "earlier in this
+    frame", which is all the unlagged path guarantees. Uses a lag of 50
+    (card_history_df's TransactionDT spans 0..299), large enough that many
+    rows lose access to their most recent same-entity transactions.
+    """
+    lag_seconds = 50.0
+    fe = FeatureEngineer()
+    result = fe.create_target_encoding(
+        card_history_df.copy(),
+        fit=True,
+        time_col="TransactionDT",
+        label_lag_seconds=lag_seconds,
+    )
+    expected = _naive_target_encoding_lagged(
+        card_history_df,
+        col=col,
+        prior=fe._global_target_mean,
+        weight=TARGET_ENCODING_PRIOR_WEIGHT,
+        time_col="TransactionDT",
+        lag_seconds=lag_seconds,
+    )
+
+    np.testing.assert_allclose(
+        result[f"{col}_target_enc"].to_numpy(dtype=float),
+        expected,
+        rtol=1e-9,
+        atol=1e-12,
+        err_msg=(
+            f"LATENCY LEAKAGE in '{col}_target_enc': with label_lag_seconds="
+            f"{lag_seconds}, the encoding does not match a per-row smoothed "
+            "mean over entity history at least that old — recent same-window "
+            "labels are leaking in as if they were instantly known."
+        ),
+    )
+
+
+@pytest.mark.unit
+def test_target_encoding_lag_zero_matches_unlagged_path(
+    card_history_df: pd.DataFrame,
+) -> None:
+    """
+    label_lag_seconds=0.0 (the FeaturesConfig default) must reproduce the
+    original same-window encoding exactly — every existing caller that
+    omits time_col/label_lag_seconds must see no behavior change from this
+    finding's fix.
+    """
+    without_lag_args = FeatureEngineer().create_target_encoding(
+        card_history_df.copy(), fit=True
+    )
+    with_lag_zero = FeatureEngineer().create_target_encoding(
+        card_history_df.copy(),
+        fit=True,
+        time_col="TransactionDT",
+        label_lag_seconds=0.0,
+    )
+    pd.testing.assert_frame_equal(without_lag_args, with_lag_zero)
+
+
+@pytest.mark.unit
+def test_target_encoding_positive_lag_without_time_col_raises() -> None:
+    """label_lag_seconds > 0 with no time_col is a programming error, not a
+    silently-ignored option — must raise, not fall back to the unlagged path."""
+    df = pd.DataFrame({"card1": [1, 1, 2], "isFraud": [0, 1, 0]})
+    with pytest.raises(ValueError, match="time_col"):
+        FeatureEngineer().create_target_encoding(df, fit=True, label_lag_seconds=30.0)
+
+
 @pytest.mark.unit
 def test_target_encoding_ignores_a_flip_of_the_rows_own_label(
     card_history_df: pd.DataFrame,
@@ -1101,9 +1221,9 @@ def test_target_encoding_ignores_a_flip_of_the_rows_own_label(
     later_same_card = card_history_df.index[
         (card_history_df["card1"] == same_card) & (card_history_df.index > target_idx)
     ]
-    assert len(later_same_card) > 0, (
-        "Fixture must place at least one later transaction on the perturbed card."
-    )
+    assert (
+        len(later_same_card) > 0
+    ), "Fixture must place at least one later transaction on the perturbed card."
 
     assert baseline.loc[target_idx, "card1_target_enc"] == pytest.approx(
         after.loc[target_idx, "card1_target_enc"]
@@ -1214,9 +1334,7 @@ def test_missing_key_history_carries_across_splits() -> None:
     groupby has to record it the same way or train's missing-key history is
     written but never read back on val/test.
     """
-    train = pd.DataFrame(
-        {"card1": [np.nan, np.nan, np.nan], "isFraud": [1, 1, 1]}
-    )
+    train = pd.DataFrame({"card1": [np.nan, np.nan, np.nan], "isFraud": [1, 1, 1]})
     val = pd.DataFrame({"card1": [np.nan], "isFraud": [0]})
 
     fe = FeatureEngineer()
@@ -1263,8 +1381,7 @@ def test_missing_key_history_accumulates_over_three_splits() -> None:
     test_out = fe.create_target_encoding(test, fit=False, update_state=False)
 
     missing_keys = [
-        k for k in fe._target_enc_state["card1"]
-        if isinstance(k, float) and np.isnan(k)
+        k for k in fe._target_enc_state["card1"] if isinstance(k, float) and np.isnan(k)
     ]
     assert not missing_keys, (
         f"Carried state holds {len(missing_keys)} raw NaN key(s). NaN cannot "
@@ -1282,3 +1399,402 @@ def test_missing_key_history_accumulates_over_three_splits() -> None:
         "The missing-key group's train+val history did not accumulate into "
         f"test: got {test_out.loc[0, 'card1_target_enc']}, expected {expected}."
     )
+
+
+# ─── PRD Phase 9 P9-2: UID client-identifier aggregates ──────────────────────
+
+
+def _uid_df(n: int = 60, seed: int = 0) -> pd.DataFrame:
+    """Synthetic frame with the columns create_uid_features needs. Only 3
+    distinct (card1, addr1, D1n) triples so most UIDs clear _UID_MIN_COUNT."""
+    rng = np.random.default_rng(seed)
+    card1 = rng.choice([1001, 1002, 1003], n)
+    addr1 = rng.choice([200.0, 300.0], n)
+    d1 = rng.choice([0.0, 5.0], n)
+    return pd.DataFrame(
+        {
+            "TransactionDT": np.zeros(n, dtype=float),  # day ~ 0 -> D1n = -D1
+            "TransactionAmt": rng.uniform(10.0, 500.0, n),
+            "card1": card1,
+            "addr1": addr1,
+            "D1": d1,
+        }
+    )
+
+
+def test_uid_features_fit_then_apply_adds_expected_columns_without_uid_itself():
+    fe = FeatureEngineer()
+    train = _uid_df(seed=1)
+    out = fe.create_uid_features(train, fit=True)
+
+    for col in (
+        "uid_count", "uid_freq", "uid_amt_mean", "uid_amt_std",
+        "uid_d1_mean", "uid_amt_ratio",
+    ):
+        assert col in out.columns
+    # The identifier must never be handed to the model.
+    assert "UID" not in out.columns and "uid" not in out.columns
+    assert out["uid_freq"].between(0.0, 1.0).all()
+    assert (out["uid_count"] >= 1).all()  # every train row's own UID counted
+
+
+def test_uid_count_and_freq_match_hand_count():
+    fe = FeatureEngineer()
+    df = pd.DataFrame(
+        {
+            "TransactionDT": [0.0, 0.0, 0.0, 0.0],
+            "TransactionAmt": [10.0, 20.0, 30.0, 40.0],
+            "card1": [1, 1, 1, 2],
+            "addr1": [5.0, 5.0, 5.0, 9.0],
+            "D1": [0.0, 0.0, 0.0, 0.0],
+        }
+    )
+    # UIDs: "1_5_0" x3, "2_9_0" x1.
+    out = fe.create_uid_features(df, fit=True)
+    assert out.loc[0, "uid_count"] == 3
+    assert out.loc[3, "uid_count"] == 1
+    assert out.loc[0, "uid_freq"] == pytest.approx(0.75)
+    assert out.loc[3, "uid_freq"] == pytest.approx(0.25)
+    # "1_5_0" has 3 rows (>= _UID_MIN_COUNT) -> real cohort mean 20.0, ratio kept.
+    assert out.loc[0, "uid_amt_mean"] == pytest.approx(20.0)
+    assert out.loc[1, "uid_amt_ratio"] == pytest.approx(1.0)  # 20 / 20
+    # "2_9_0" is a singleton -> aggregates fall back to global, ratio = 1.0.
+    assert out.loc[3, "uid_amt_mean"] == pytest.approx(fe._uid_global["uid_amt_mean"])
+    assert out.loc[3, "uid_amt_ratio"] == pytest.approx(1.0)
+
+
+def test_uid_small_and_unseen_cohorts_get_neutral_ratio_and_global_stats():
+    fe = FeatureEngineer()
+    train = _uid_df(seed=2)
+    fe.create_uid_features(train, fit=True)
+
+    unseen = pd.DataFrame(
+        {
+            "TransactionDT": [0.0, 0.0],
+            "TransactionAmt": [123.0, 456.0],
+            "card1": [999999, 888888],
+            "addr1": [1.0, 2.0],
+            "D1": [3.0, 4.0],
+        }
+    )
+    out = fe.create_uid_features(unseen, fit=False)
+    assert (out["uid_count"] == 0).all()
+    assert (out["uid_freq"] == 0.0).all()
+    assert out["uid_amt_mean"].eq(fe._uid_global["uid_amt_mean"]).all()
+    assert out["uid_amt_std"].eq(fe._uid_global["uid_amt_std"]).all()
+    # Unseen UID -> neutral ratio, NOT amt/global (mle-reviewer M1).
+    assert (out["uid_amt_ratio"] == 1.0).all()
+
+
+def test_uid_features_missing_required_column_is_a_noop_with_warning(caplog):
+    fe = FeatureEngineer()
+    df = _uid_df().drop(columns=["D1"])
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        out = fe.create_uid_features(df, fit=True)
+    assert "uid_freq" not in out.columns
+    assert any("create_uid_features" in m for m in caplog.messages)
+
+
+def test_uid_features_survive_transformer_save_load(tmp_path):
+    fe = FeatureEngineer()
+    train = _uid_df(seed=3)
+    fe.create_uid_features(train, fit=True)
+    fe.save_transformers(str(tmp_path))
+
+    restored = FeatureEngineer()
+    restored.load_transformers(str(tmp_path))
+    assert restored._uid_maps == fe._uid_maps
+    assert restored._uid_global == fe._uid_global
+
+    a = fe.create_uid_features(train, fit=False)
+    b = restored.create_uid_features(train, fit=False)
+    pd.testing.assert_frame_equal(a, b)
+
+
+def test_uid_missing_addr1_vs_missing_d1_do_not_collapse_together():
+    """A card missing only addr1 must not share a UID with the same card
+    missing only D1, nor with the same card missing both (mle-reviewer M3)."""
+    fe = FeatureEngineer()
+    df = pd.DataFrame(
+        {
+            "TransactionDT": [0.0, 0.0, 0.0],
+            "TransactionAmt": [10.0, 20.0, 30.0],
+            "card1": [7, 7, 7],
+            "addr1": [np.nan, 5.0, np.nan],
+            "D1": [1.0, np.nan, np.nan],
+        }
+    )
+    uid = fe._compute_uid(df)
+    assert uid.nunique() == 3  # "7_naA_-1", "7_5_naD", "7_naA_naD" all distinct
+
+
+# ─── PRD Phase 9 step 9.4 — multi-window RFM/velocity + dist1 ────────────────
+#
+# Written before the implementation (TDD RED). The properties below are the
+# ones a fixed trailing window can silently get wrong: including the current
+# row, counting another card's transactions, or letting the window boundary
+# drift with input order rather than with TransactionDT.
+
+
+ROLLING_WINDOW_COLS = [
+    "tx_count_10min_per_card",
+    "tx_count_1h_per_card",
+    "tx_count_24h_per_card",
+]
+
+
+def _naive_rolling_counts(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    O(n^2) per-row oracle: for each row, count STRICTLY PRIOR transactions of
+    the same card whose TransactionDT falls inside the trailing window.
+
+    Deliberately the dumbest correct implementation — the vectorised version
+    is only trustworthy if it agrees with this on every row.
+    """
+    windows = {
+        "tx_count_10min_per_card": 600.0,
+        "tx_count_1h_per_card": 3600.0,
+        "tx_count_24h_per_card": 86400.0,
+    }
+    out = pd.DataFrame(index=df.index)
+    for col, span in windows.items():
+        vals = []
+        for i in df.index:
+            card = df.at[i, "card1"]
+            t = df.at[i, "TransactionDT"]
+            prior = df[(df["card1"] == card) & (df["TransactionDT"] < t)]
+            vals.append(int((prior["TransactionDT"] >= t - span).sum()))
+        out[col] = vals
+    return out
+
+
+@pytest.mark.unit
+def test_rolling_window_counts_match_naive_oracle(
+    card_history_df: pd.DataFrame,
+) -> None:
+    """Vectorised trailing-window counts must equal the per-row oracle."""
+    result = FeatureEngineer().create_velocity_features(card_history_df.copy())
+    expected = _naive_rolling_counts(
+        card_history_df.sort_values("TransactionDT").reset_index(drop=True)
+    )
+
+    for col in ROLLING_WINDOW_COLS:
+        assert col in result.columns, f"missing rolling-window feature '{col}'"
+        np.testing.assert_array_equal(
+            result[col].to_numpy(dtype=int),
+            expected[col].to_numpy(dtype=int),
+            err_msg=(
+                f"'{col}' disagrees with a per-row count over strictly prior "
+                "same-card transactions inside the trailing window."
+            ),
+        )
+
+
+@pytest.mark.unit
+def test_rolling_window_counts_exclude_the_current_row(
+    card_history_df: pd.DataFrame,
+) -> None:
+    """A card's first transaction has no prior history in ANY window, so every
+    trailing count must be exactly 0 there — the sharpest symptom of a
+    self-inclusive window."""
+    result = FeatureEngineer().create_velocity_features(card_history_df.copy())
+    first_rows = result.groupby("card1", sort=False).head(1)
+
+    for col in ROLLING_WINDOW_COLS:
+        offenders = first_rows.loc[first_rows[col] != 0, ["card1", col]]
+        assert offenders.empty, (
+            f"CURRENT-ROW LEAKAGE in '{col}': a card's first transaction has a "
+            f"non-zero trailing count:\n{offenders}"
+        )
+
+
+@pytest.mark.unit
+def test_rolling_windows_are_nested_and_bounded_by_expanding_count(
+    card_history_df: pd.DataFrame,
+) -> None:
+    """10min <= 1h <= 24h <= expanding count, row-wise. A window that counted
+    other cards, or that double-counted, breaks this ordering."""
+    fe = FeatureEngineer()
+    result = fe.create_card_aggregates(card_history_df.copy())
+    result = fe.create_velocity_features(result)
+
+    assert (result["tx_count_10min_per_card"] <= result["tx_count_1h_per_card"]).all()
+    assert (result["tx_count_1h_per_card"] <= result["tx_count_24h_per_card"]).all()
+    assert (
+        result["tx_count_24h_per_card"] <= result["tx_count_per_card"]
+    ).all(), "a trailing-window count exceeded the card's total prior count"
+
+
+@pytest.mark.unit
+def test_rolling_windows_ignore_other_cards() -> None:
+    """Interleaving a second card's transactions must not change the first
+    card's window counts."""
+    base = pd.DataFrame(
+        {
+            "TransactionDT": [0.0, 100.0, 200.0, 300.0],
+            "TransactionAmt": [10.0, 20.0, 30.0, 40.0],
+            "card1": [1, 1, 1, 1],
+        }
+    )
+    noisy = pd.DataFrame(
+        {
+            "TransactionDT": [0.0, 50.0, 100.0, 150.0, 200.0, 250.0, 300.0],
+            "TransactionAmt": [10.0, 99.0, 20.0, 99.0, 30.0, 99.0, 40.0],
+            "card1": [1, 2, 1, 2, 1, 2, 1],
+        }
+    )
+    fe = FeatureEngineer()
+    a = fe.create_velocity_features(base.copy())
+    b = fe.create_velocity_features(noisy.copy())
+    b_card1 = b[b["card1"] == 1].reset_index(drop=True)
+
+    for col in ROLLING_WINDOW_COLS:
+        np.testing.assert_array_equal(
+            a[col].to_numpy(dtype=int),
+            b_card1[col].to_numpy(dtype=int),
+            err_msg=f"'{col}' changed when another card's rows were interleaved",
+        )
+
+
+@pytest.mark.unit
+def test_rolling_window_boundary_is_half_open_on_time_not_position() -> None:
+    """A transaction exactly `span` seconds old is INSIDE the window
+    (>= t-span); one a hair older is outside. Pins the boundary to time,
+    not to row position."""
+    fe = FeatureEngineer()
+    df = pd.DataFrame(
+        {
+            "TransactionDT": [0.0, 1.0, 600.0],
+            "TransactionAmt": [10.0, 10.0, 10.0],
+            "card1": [1, 1, 1],
+        }
+    )
+    out = fe.create_velocity_features(df.copy())
+    # at t=600 the window opens at 0.0, so both prior rows are inside
+    assert out.loc[2, "tx_count_10min_per_card"] == 2
+
+    df2 = df.copy()
+    df2.loc[2, "TransactionDT"] = 601.0  # window opens at 1.0 -> drops t=0
+    out2 = fe.create_velocity_features(df2)
+    assert out2.loc[2, "tx_count_10min_per_card"] == 1
+
+
+@pytest.mark.unit
+def test_short_vs_long_window_amount_deviation_excludes_current_row() -> None:
+    """`amt_24h_vs_card_mean_ratio` compares the trailing-24h mean against the
+    card's expanding mean, both over strictly prior rows. A card's first
+    transaction has neither, so the ratio must take its neutral 1.0."""
+    fe = FeatureEngineer()
+    df = pd.DataFrame(
+        {
+            "TransactionDT": [0.0, 10.0, 20.0, 30.0],
+            "TransactionAmt": [100.0, 100.0, 100.0, 5000.0],
+            "card1": [1, 1, 1, 1],
+        }
+    )
+    out = fe.create_card_aggregates(df.copy())
+    out = fe.create_velocity_features(out)
+
+    assert "amt_24h_mean_per_card" in out.columns
+    assert "amt_24h_vs_card_mean_ratio" in out.columns
+    # first row: no history at all -> neutral
+    assert out.loc[0, "amt_24h_vs_card_mean_ratio"] == pytest.approx(1.0)
+    # all prior amounts identical and inside 24h -> short mean == long mean
+    assert out.loc[2, "amt_24h_vs_card_mean_ratio"] == pytest.approx(1.0)
+    # the 5000 row's own amount must NOT enter its own trailing mean
+    assert out.loc[3, "amt_24h_mean_per_card"] == pytest.approx(100.0)
+
+
+@pytest.mark.unit
+def test_rolling_windows_are_invariant_to_input_row_order(
+    card_history_df: pd.DataFrame,
+) -> None:
+    """Shuffling input rows must not change the result — the function sorts by
+    TransactionDT internally, as the batch pipeline relies on."""
+    fe = FeatureEngineer()
+    ordered = fe.create_velocity_features(card_history_df.copy())
+    shuffled = fe.create_velocity_features(
+        card_history_df.sample(frac=1.0, random_state=7).reset_index(drop=True)
+    )
+    for col in ROLLING_WINDOW_COLS:
+        np.testing.assert_array_equal(
+            ordered[col].to_numpy(dtype=int),
+            shuffled[col].to_numpy(dtype=int),
+            err_msg=f"'{col}' depends on input row order",
+        )
+
+
+# ─── 9.4 dist1 engineering (scoped to ProductCD == 'W') ──────────────────────
+
+
+@pytest.mark.unit
+def test_dist1_features_only_fire_on_product_w() -> None:
+    """`dist1` is non-null for ProductCD=='W' only (verified against the raw
+    data 2026-09-08). Non-W rows must take the neutral fill, never a value
+    derived from a null."""
+    fe = FeatureEngineer()
+    df = pd.DataFrame(
+        {
+            "ProductCD": ["W", "W", "C", "H"],
+            "dist1": [10.0, 100.0, np.nan, np.nan],
+        }
+    )
+    out = fe.create_dist_features(df.copy(), fit=True)
+
+    assert out.loc[0, "dist1_log"] == pytest.approx(np.log1p(10.0))
+    assert out.loc[1, "dist1_log"] == pytest.approx(np.log1p(100.0))
+    # non-W rows: neutral sentinel, and never flagged high
+    assert out.loc[2, "dist1_log"] == -1.0
+    assert out.loc[3, "dist1_log"] == -1.0
+    assert out.loc[2, "dist1_high"] == 0
+    assert out.loc[3, "dist1_high"] == 0
+
+
+@pytest.mark.unit
+def test_dist1_high_threshold_is_fit_on_train_only() -> None:
+    """The top-quintile cut is fitted on train and REUSED unchanged on later
+    splits. Re-fitting per split would leak the holdout's own distribution."""
+    fe = FeatureEngineer()
+    train = pd.DataFrame({"ProductCD": ["W"] * 10, "dist1": np.arange(1.0, 11.0)})
+    fitted = fe.create_dist_features(train.copy(), fit=True)
+    cut = fe._dist1_high_threshold
+    assert cut is not None
+
+    # A holdout whose values are all far larger must NOT move the cut.
+    holdout = pd.DataFrame({"ProductCD": ["W"] * 5, "dist1": np.arange(500.0, 505.0)})
+    applied = fe.create_dist_features(holdout.copy(), fit=False)
+    assert fe._dist1_high_threshold == cut, "threshold was re-fit on holdout"
+    assert (applied["dist1_high"] == 1).all(), "holdout rows are all above the cut"
+    assert fitted["dist1_high"].sum() > 0
+
+
+@pytest.mark.unit
+def test_dist1_features_survive_transformer_save_load(tmp_path) -> None:
+    """The fitted cut must round-trip, or serving silently re-derives a
+    different `dist1_high` than training used."""
+    fe = FeatureEngineer()
+    train = pd.DataFrame({"ProductCD": ["W"] * 20, "dist1": np.arange(1.0, 21.0)})
+    fe.create_dist_features(train.copy(), fit=True)
+    fe.save_transformers(str(tmp_path))
+
+    restored = FeatureEngineer()
+    restored.load_transformers(str(tmp_path))
+    assert restored._dist1_high_threshold == fe._dist1_high_threshold
+
+    probe = pd.DataFrame({"ProductCD": ["W"] * 20, "dist1": np.arange(1.0, 21.0)})
+    pd.testing.assert_frame_equal(
+        fe.create_dist_features(probe.copy(), fit=False),
+        restored.create_dist_features(probe.copy(), fit=False),
+    )
+
+
+@pytest.mark.unit
+def test_dist_features_missing_columns_is_a_noop() -> None:
+    """A frame without ProductCD/dist1 must pass through unchanged rather than
+    raising — matching how the other feature groups degrade."""
+    fe = FeatureEngineer()
+    df = pd.DataFrame({"TransactionAmt": [1.0, 2.0]})
+    out = fe.create_dist_features(df.copy(), fit=True)
+    assert list(out.columns) == ["TransactionAmt"]

@@ -1,0 +1,76 @@
+{
+  "incumbent_val_pr_auc": 0.526,
+  "gate1_threshold": 0.5502,
+  "results": [
+    {
+      "variant": "arm_b_weight_decay_1e-4",
+      "gnn_overrides": {
+        "weight_decay": 0.0001
+      },
+      "val_pr_auc_final_epoch": 0.5341404067357052,
+      "val_pr_auc_best_epoch": 0.5341979071552538,
+      "epochs_run": 25,
+      "mean_epoch_seconds": 66.77713833200046,
+      "wall_clock_seconds": 1674.221815099998,
+      "beats_incumbent_val": true,
+      "clears_gate1": false
+    },
+    {
+      "variant": "arm_b_weight_decay_1e-3",
+      "gnn_overrides": {
+        "weight_decay": 0.001
+      },
+      "val_pr_auc_final_epoch": 0.5205900660401335,
+      "val_pr_auc_best_epoch": 0.5205254981645407,
+      "epochs_run": 24,
+      "mean_epoch_seconds": 67.28061461666766,
+      "wall_clock_seconds": 1617.8533985999966,
+      "beats_incumbent_val": false,
+      "clears_gate1": false
+    },
+    {
+      "variant": "arm_b_dropout_0.4",
+      "gnn_overrides": {
+        "dropout": 0.4
+      },
+      "val_pr_auc_final_epoch": 0.5188392163339826,
+      "val_pr_auc_best_epoch": 0.5188522535738551,
+      "epochs_run": 22,
+      "mean_epoch_seconds": 92.75319718636324,
+      "wall_clock_seconds": 2043.1787532000017,
+      "beats_incumbent_val": false,
+      "clears_gate1": false
+    },
+    {
+      "variant": "arm_b_dropout_0.6",
+      "gnn_overrides": {
+        "dropout": 0.6
+      },
+      "val_pr_auc_final_epoch": 0.49156475340195216,
+      "val_pr_auc_best_epoch": 0.49162016115252893,
+      "epochs_run": 25,
+      "mean_epoch_seconds": 68.31075199999846,
+      "wall_clock_seconds": 1711.150956700003,
+      "beats_incumbent_val": false,
+      "clears_gate1": false
+    },
+    {
+      "variant": "arm_b_weight_decay_1e-3_dropout_0.5",
+      "gnn_overrides": {
+        "weight_decay": 0.001,
+        "dropout": 0.5
+      },
+      "val_pr_auc_final_epoch": 0.4935060929249496,
+      "val_pr_auc_best_epoch": 0.4935177429051511,
+      "epochs_run": 16,
+      "mean_epoch_seconds": 67.13573555625044,
+      "wall_clock_seconds": 1076.6008499000018,
+      "beats_incumbent_val": false,
+      "clears_gate1": false
+    }
+  ],
+  "best_variant": "arm_b_weight_decay_1e-4",
+  "best_val_pr_auc": 0.5341979071552538,
+  "gate0_pass": true,
+  "gate1_pass": false
+}

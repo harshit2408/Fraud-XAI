@@ -17,6 +17,15 @@ data:
 features:
   drop_cols: ["TransactionID", "TransactionDT"]
   v_features_pca_components: 30  # PCA on V1-V339
+  # Finding F6 (2026-08-19 metrics audit): the expanding target encoding
+  # (card1/card2/addr1/P_emaildomain/R_emaildomain/device_brand) previously
+  # counted same-window labels as instantly known, which a live model never
+  # has — confirmed fraud labels take time to arrive after a transaction.
+  # 30 days is a conservative, documented assumption pending an actual
+  # label-latency SLA from a production fraud/chargeback pipeline; revisit
+  # this value once real latency data is available instead of treating it
+  # as validated. 0 disables the lag adjustment entirely.
+  target_encoding_label_lag_days: 30
   categorical_cols:
     - "ProductCD"
     - "card4"
@@ -64,7 +73,14 @@ model:
     gamma: 5.543434625011016e-08
     device: "auto"  # auto-detect CUDA/CPU (Phase D7); resolved by src/device.py
     tree_method: "hist"
-    scale_pos_weight: 29  # set to (neg_count / pos_count) at runtime
+    # PRD Phase 9 P9-3 (2026-09-08): reduced 29 -> 1 (no class weighting).
+    # The imbalance ablation (scripts/run_ablation.py, reports/
+    # imbalance_ablation_results.json) swept spw at 1 / 7.25 / 14.5 / 21.75 /
+    # 29 and spw=1 won on BOTH val PR-AUC (0.5907 vs 0.5648 at spw=29) and
+    # best val F1 (0.578 @ threshold 0.22 vs 0.557 @ 0.79) — a monotonic
+    # trend. Now read by train_xgb.py (previously ignored: the runtime
+    # neg/pos ratio always overrode it).
+    scale_pos_weight: 1
     eval_metric: "aucpr"
     early_stopping_rounds: 100
   lightgbm:
@@ -77,8 +93,22 @@ model:
     min_data_in_leaf: 50
     reg_alpha: 0.1
     reg_lambda: 1.0
-    scale_pos_weight: 29
+    # PRD Phase 9 P9-3 (2026-09-08): 29 -> 1, mirroring the XGBoost ablation
+    # result (spw=1 wins val PR-AUC + F1 monotonically). Now read by
+    # train_lgbm.py (previously ignored).
+    scale_pos_weight: 1
     eval_metric: "average_precision"
+    # Re-enabled 2026-09-09 (4-agent ML review, mle-reviewer finding).
+    # Was 0 (disabled): the 2026-08-19 metrics audit's LightGBM run stopped
+    # at iteration 4 of 1200 with stopping_rounds=100, a training failure,
+    # not a converged model. Root cause was min_data_in_leaf=50 +
+    # reg_lambda=1.0 halting tree growth almost immediately under
+    # scale_pos_weight=29. That condition no longer exists — P9-3
+    # (2026-09-08) already changed scale_pos_weight 29 -> 1 above, which
+    # removes the blocker this flag was working around. The full
+    # 1200-iteration diagnostic run (early_stopping_rounds=0) since showed
+    # measurable overfitting (train PR-AUC 0.93 vs test 0.54), so stopping is
+    # re-enabled rather than left disabled by default.
     early_stopping_rounds: 100
   tft:
     max_encoder_length: 10
@@ -86,6 +116,15 @@ model:
     hidden_size: 16
     attention_head_size: 4
     num_lstm_layers: 1
+    # Reverted 2026-09-09 (4-agent ML review): P9-6 raised this 0.3 -> 0.4 to
+    # fight memorisation (train 0.9519 vs val 0.4975), but that TFT was never
+    # re-blended into the ensemble and its own test PR-AUC got WORSE
+    # (0.4269 -> 0.4009). Retraining with the TFT scaler-fit-scope fix (item
+    # 2 of this review — see src/data/sequence_builder.py fit_scaler_on) on
+    # top of P9-6's settings collapsed test PR-AUC further, to 0.2902, with
+    # a widened val/test gap (0.540 val vs 0.290 test) — worse than either
+    # prior state. Reverting to isolate the scaler fix's effect from P9-6's
+    # regression.
     dropout: 0.3
     hidden_continuous_size: 32
     learning_rate: 0.0023288031819030802
@@ -93,21 +132,82 @@ model:
     batch_size: 128
     patience: 10
     gradient_clip_val: 1.0
+    # Reverted 2026-09-09 alongside dropout above, same reason.
+    weight_decay: 0.00001
     device: "auto"  # auto-detect CUDA/CPU
     # Phase B4: mixed precision, CUDA-only. Re-enabled now that inputs are
     # scaled (see src/data/sequence_builder.py QuantileTransformer); set to
     # false if NaNs reappear on a given GPU/driver combination.
     use_amp: true
+  gnn:
+    # ADR-006 Gate 2 confirmatory run — trial 14's winning HPO config (Arm C,
+    # study gnn_arm_c_hpo). Trial 14 reached val PR-AUC 0.5505 at epoch 25,
+    # clearing Gate 1 (>=0.5502), before a CUDA "bad allocation" crash at
+    # epoch 26. Values below are read from the Optuna study's own record for
+    # trial 14 (reports/gnn_hpo_study.db), NOT from the HPO log's "Best
+    # params" summary line — that line reports trial 7, and a first
+    # confirmatory attempt (mlflow e3feda1d..., test PR-AUC 0.4797) was
+    # voided because it paired trial 7's optimizer settings with trial 14's
+    # architecture. See ADR-006 for that voided run's record.
+    hidden_dims: [128, 64, 32]    # 3-layer GraphSAGE (trial 14)
+    mlp_hidden_dims: [64, 32]     # head unchanged
+    dropout: 0.294643488969589
+    input_dropout: 0.1475882295146573
+    l2_normalize: false
+    residual: true
+    aggr: "mean"                  # GraphSAGE-mean aggregation
+    # NeighborLoader per-layer fan-out — 3 entries to match 3-layer depth.
+    num_neighbors: [15, 10, 5]
+    learning_rate: 0.001688133009475037
+    weight_decay: 0.00001121439230106226
+    max_epochs: 100               # ADR-006 §3.4 full confirmatory budget
+    batch_size: 1024             # seed nodes per NeighborLoader mini-batch
+    patience: 10                 # ADR-006 §3.4 full confirmatory budget
+    gradient_clip_val: 1.0
+    device: "auto"              # resolved by src/device.py, same as xgboost/tft
+    # Class-weighted BCE. Trial 14's pos_weight_scale=1.1882295119501993
+    # applied to the empirical train neg/pos ratio (398840/14538 = 27.4343):
+    # 27.434310083918007 * 1.1882295119501993 = 32.59825688170432, matching
+    # trial 14's own training log line (pos_weight = 32.5983).
+    pos_weight: 32.59825688170432
+    # Edge-construction neighbour caps (arXiv:2604.14231): connect a node to
+    # at most N transactions sharing card1 / the composite (addr1, ProductCD)
+    # key. Caps are applied WITHIN each temporal phase's eligible node set
+    # (mle-reviewer R1) so test-row placement cannot reshape train->train edges.
+    card1_max_neighbors: 10
+    addr_product_max_neighbors: 5
+    graph_cache_path: "data/processed/graph/fraud_graph.pt"
+    # ADR-006 §3.1 Arm A — richer edges. "addr_card" adds (addr1,card1)
+    # alongside the legacy card1/(addr1,ProductCD) pair — trial 14's winning
+    # edge spec.
+    edge_spec_set: "addr_card"
+    card_full_max_neighbors: null   # null => defaults to card1_max_neighbors
+    addr_card_max_neighbors: null   # null => defaults to addr_product_max_neighbors
+    # Eval scoring is batched (a full-graph forward OOMs an 8 GB card at this
+    # node/edge count). Wide deterministic fan-out ~= full-neighbourhood.
+    eval_num_neighbors: [40, 20]
+    eval_batch_size: 4096
+    use_graph_cache: true
 
 imbalance:
   # Resampling and loss weighting are independent knobs — combining a resampler
   # with a count-based loss weight (e.g. oversample + weighted_bce) double-corrects
   # for imbalance. Pick exactly one primary mechanism; see train_tft.py:resolve_imbalance_config.
+  # Reverted 2026-09-09 (4-agent ML review) alongside model.tft.dropout and
+  # weight_decay above — see those comments. P9-6 had set this "none" to
+  # remove the WeightedRandomSampler (diagnosed as a memorisation driver,
+  # ~27x oversampling of the ~3.4% fraud class), but the resulting TFT was
+  # never re-blended and scored worse on test both times it was tried.
   sampling_strategy: "oversample"  # options: none, oversample, smote (smote not yet supported for sequence data)
   loss_function: "focal_loss"      # options: focal_loss, weighted_bce, bce
   smote_k_neighbors: 5
-  focal_loss_gamma: 2.0
-  focal_loss_alpha: 0.25
+  # PRD Phase 9 P9-3 (2026-09-08): gamma 2.0 -> 1.0, alpha 0.25 -> 0.10 to
+  # reduce the TFT's recall-favouring positive-class emphasis, mirroring the
+  # GBDT scale_pos_weight reduction. The oversampler is left in place — it is
+  # a separate mechanism from the loss weighting and the ablation only
+  # covered the GBDT spw lever; the TFT contributes ~13% of the blend.
+  focal_loss_gamma: 1.0
+  focal_loss_alpha: 0.10
 
 thresholds:
   default: 0.5
@@ -124,7 +224,56 @@ serving:
   port: 8000
   model_path: "models/xgb_model.pkl"
   tft_model_path: "models/tft_model.pt"
+  lgbm_model_path: "models/lgbm_model.pkl"
   log_file: "logs/predictions.jsonl"
+  # ADR-001 §3.5: serving reads only from models/, which docker-compose mounts
+  # into fraud-api. data/processed/ is a TRAINING output and is NOT mounted, so
+  # the fitted transformers are written to both locations by save_transformers.
+  transformer_path: "models/transformers"
+  # ADR-001 §4.3: blend weights + per-mode thresholds as a checksummed serving
+  # artifact. Written by scripts/run_ensemble_eval.py. Serving must never read
+  # them from reports/, which is an evaluation output.
+  ensemble_spec_path: "models/ensemble.json"
+
+# 2026-08-20 (mle-reviewer review, docs/IMPLEMENTATION_PLAN.md Phase
+# F-Audit): scripts/run_ensemble_eval.py's simplex weight search, added when
+# LightGBM was proposed as a 3rd ensemble input alongside XGBoost+TFT.
+ensemble:
+  grid_step: 0.02
+  refine_step: 0.002
+  # LightGBM shares XGBoost's feature set and imbalance strategy (unlike
+  # TFT, which is architecturally decorrelated) — reviewer's diversity
+  # concern means any lift from adding it is presumed small/noise until
+  # proven otherwise. Keep it out of the production blend unless the 3-way
+  # ensemble beats the 2-way (XGBoost+TFT) baseline's VALIDATION PR-AUC by
+  # at least this much.
+  # 2026-09-09 (4-agent ML review): this gate previously read the *test*
+  # split, making a model-selection decision on the held-out set — LightGBM's
+  # membership had flipped across multiple evaluation runs, so test was being
+  # re-consulted for the same decision repeatedly. Fixed in
+  # scripts/run_ensemble_eval.py to gate on validation; the test-split lift
+  # is still computed and logged as a diagnostic only.
+  min_lightgbm_lift: 0.005
+  bootstrap_resamples: 50
+  bootstrap_grid_step: 0.05
+
+# PRD Phase 4 (P4-3): TreeSHAP explanations for the served XGBoost component
+# (ADR-001 §3.4). The explainer is built once at startup from the loaded
+# booster, holds no per-request state, and explains the exact engineered
+# feature vector the model scored.
+explainability:
+  # false = build no explainer, skip the shap import, return an empty
+  # `explanation` on every prediction. true with no loadable xgb model fails
+  # startup rather than serving predictions that can never be explained.
+  enabled: true
+  # How many risk / mitigating factors to surface per prediction.
+  top_k: 5
+  # Per-request wall-clock budget (ms) for the SHAP call on the scoring path.
+  # TreeSHAP on the 171-feature booster is ~140 ms p50, which would otherwise
+  # dominate /predict latency (ecc:mle-reviewer, P4-8). On timeout the
+  # explanation is dropped like any other explainer failure — the score is
+  # unaffected — and explanation_failures increments. 0 = no budget.
+  timeout_ms: 200
 
 kafka:
   bootstrap_servers: "localhost:9092"
@@ -138,3 +287,22 @@ monitoring:
   evidently_report_dir: "monitoring/reports"
   drift_check_interval_hours: 24
   prometheus_port: 8001
+  # PRD 7.1: alert when more than this share of compared features drift.
+  # A monitoring threshold is a product decision (how much distribution shift
+  # is tolerable before someone is paged), so it lives here rather than as a
+  # literal in src/monitoring/drift_reporter.py.
+  drift_share_threshold: 0.30
+  # Most recent predictions compared against the training reference. Large
+  # enough for a stable per-feature test, bounded so the job cannot load an
+  # unbounded log.
+  drift_window_rows: 5000
+  # A window missing more than this share of the reference schema alerts on its
+  # own. drift_share is computed over COMPARED columns only, so features a
+  # pipeline bug silently drops leave both numerator and denominator and can
+  # never move it - an entire feature group could vanish while the report still
+  # said "no drift" (ecc:mle-reviewer, 2026-09-07).
+  missing_share_threshold: 0.20
+  # PRD Phase 7.4: drift_scheduler.py writes a JSON alert here on each run that
+  # detects drift, so an operator has a durable record independent of the HTML
+  # report.
+  alerts_dir: "monitoring/alerts"

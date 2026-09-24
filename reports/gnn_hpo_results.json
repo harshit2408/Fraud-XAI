@@ -1,0 +1,31 @@
+{
+  "n_trials_requested": 5,
+  "n_trials_completed": 15,
+  "incumbent_val_pr_auc": 0.526,
+  "gate1_threshold": 0.5502,
+  "best_val_pr_auc": 0.5483777253086302,
+  "best_params": {
+    "learning_rate": 0.000803434447561941,
+    "weight_decay": 0.00014817820606039095,
+    "dropout": 0.27046211248738133,
+    "input_dropout": 0.16043939615080793,
+    "num_layers": 3,
+    "hidden_dims": [
+      128,
+      64,
+      32
+    ],
+    "residual": true,
+    "l2_normalize": false,
+    "aggr": "mean",
+    "num_neighbors": [
+      15,
+      10,
+      5
+    ],
+    "pos_weight_scale": 0.5055221171236024,
+    "edge_spec_set": "legacy"
+  },
+  "beats_incumbent": true,
+  "clears_gate1": false
+}

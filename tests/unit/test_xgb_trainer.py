@@ -9,7 +9,39 @@ import xgboost as xgb
 from sklearn.isotonic import IsotonicRegression
 from xgboost import XGBClassifier
 
-from src.training.train_xgb import XGBTrainer, _artifact_paths
+from src.training.run_logging import RunLogger
+from src.training.train_xgb import XGBTrainer, _artifact_paths, resolve_scale_pos_weight
+
+
+# ─── PRD Phase 9 P9-3: scale_pos_weight config-override resolution ──────────
+
+
+def test_resolve_scale_pos_weight_uses_positive_config_value():
+    cfg = {"model": {"xgboost": {"scale_pos_weight": 1}}}
+    assert resolve_scale_pos_weight(cfg, neg_count=27_000, pos_count=1_000) == 1.0
+
+
+def test_resolve_scale_pos_weight_falls_back_to_ratio_when_absent():
+    cfg = {"model": {"xgboost": {}}}
+    assert resolve_scale_pos_weight(cfg, neg_count=27_000, pos_count=1_000) == 27.0
+
+
+@pytest.mark.parametrize("bad", [0, -5, None, False, True])
+def test_resolve_scale_pos_weight_ignores_non_positive_or_bool_config(bad):
+    cfg = {"model": {"xgboost": {"scale_pos_weight": bad}}}
+    # bool is a subclass of int — True must NOT be read as spw=1.
+    assert resolve_scale_pos_weight(cfg, neg_count=20, pos_count=2) == 10.0
+
+
+def test_resolve_scale_pos_weight_reads_the_named_model_key():
+    cfg = {"model": {"lightgbm": {"scale_pos_weight": 3}, "xgboost": {"scale_pos_weight": 9}}}
+    assert resolve_scale_pos_weight(cfg, 20, 2, model_key="lightgbm") == 3.0
+    assert resolve_scale_pos_weight(cfg, 20, 2, model_key="xgboost") == 9.0
+
+
+def test_resolve_scale_pos_weight_rejects_zero_positives():
+    with pytest.raises(ValueError, match="pos_count must be > 0"):
+        resolve_scale_pos_weight({"model": {}}, neg_count=10, pos_count=0)
 
 
 @pytest.fixture
@@ -47,6 +79,45 @@ def mock_data():
     X_train, y_train = X.iloc[:80], y.iloc[:80]
     X_val, y_val = X.iloc[80:], y.iloc[80:]
     return X_train, y_train, X_val, y_val
+
+
+def test_train_with_run_logger_writes_tensorboard_events_and_checkpoints(
+    mock_config, mock_data, tmp_path
+):
+    """Closes part of finding F2's fix (mid-training visibility) for
+    XGBoost: passing run_logger= to the real train() must produce an actual
+    TensorBoard event file and at least one periodic checkpoint, not just
+    console log lines. n_estimators is bumped to 60 here (default
+    checkpoint cadence is every 50 rounds) so the default callback
+    configuration — the one main() actually uses — has a chance to fire at
+    least once, without early stopping cutting the run short first."""
+    config = {
+        "model": {
+            "xgboost": {
+                **mock_config["model"]["xgboost"],
+                "n_estimators": 60,
+                "early_stopping_rounds": 60,  # disable early stopping for this probe
+            }
+        }
+    }
+    trainer = XGBTrainer(config)
+    X_train, y_train, X_val, y_val = mock_data
+    trainer.build_model(scale_pos_weight=1.0)
+
+    run_logger = RunLogger(
+        run_type="xgboost", run_name="test",
+        base_dir=tmp_path / "runs", checkpoint_base_dir=tmp_path / "checkpoints",
+    )
+    try:
+        trainer.train(X_train, y_train, X_val, y_val, run_logger=run_logger)
+    finally:
+        run_logger.close()
+
+    event_files = list(run_logger.log_dir.glob("events.out.tfevents.*"))
+    assert event_files, f"No TensorBoard event file written to {run_logger.log_dir}"
+
+    checkpoint_files = list(run_logger.checkpoint_dir.glob("checkpoint_step_*.ubj"))
+    assert checkpoint_files, f"No checkpoint written to {run_logger.checkpoint_dir}"
 
 
 def test_model_build_with_params(mock_config):

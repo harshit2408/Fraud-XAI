@@ -1,0 +1,89 @@
+{
+  "step": "9.0 baseline (deployed 3-way ensemble, pre-Phase-9)",
+  "ensemble_spec_stamp": "ensemble.json run=0fb89a9beb3f4dbd8883dce82819979f mtime=1788254377",
+  "n_rows": 118109,
+  "n_fraud": 4064,
+  "pr_auc": 0.5375283785155435,
+  "roc_auc": 0.9066042718063011,
+  "deployed_threshold": 0.006123399927495639,
+  "precision_at_recall": {
+    "0.70": {
+      "target_recall": 0.7,
+      "achieved_recall": 0.7000492125984252,
+      "precision": 0.27968934329532047,
+      "threshold": 0.07455536010510894,
+      "f1": 0.399690924416971
+    },
+    "0.80": {
+      "target_recall": 0.8,
+      "achieved_recall": 0.8001968503937008,
+      "precision": 0.15952906548933038,
+      "threshold": 0.03184422926254245,
+      "f1": 0.2660231502310933
+    },
+    "0.90": {
+      "target_recall": 0.9,
+      "achieved_recall": 0.9000984251968503,
+      "precision": 0.0945830639948287,
+      "threshold": 0.01333766964262923,
+      "f1": 0.17117854886637499
+    }
+  },
+  "at_deployed_threshold": {
+    "label": "deployed",
+    "threshold": 0.006123399927495639,
+    "tp": 3881,
+    "fp": 58930,
+    "fn": 183,
+    "tn": 55115,
+    "precision": 0.06178854022384614,
+    "recall": 0.9549704724409449,
+    "f1": 0.11606728971962617
+  },
+  "at_rederived_threshold": null,
+  "business_impact_prd": {
+    "threshold": 0.006123399927495639,
+    "convention": "prd",
+    "recall": 0.9549704724409449,
+    "false_positive_rate": 0.5167258538296287,
+    "precision": 0.06178854022384614,
+    "annual_transactions": 1197483.888888889,
+    "annual_fraud": 41204.09557649667,
+    "annual_tp": 39348.69461918887,
+    "annual_fn": 1855.400957307797,
+    "annual_fp": 597479.6634652925,
+    "gross_benefit": 18887373.417210657,
+    "false_negative_loss": 927700.4786538985,
+    "false_positive_cost": 2987398.317326463,
+    "net_annual_value": 14972274.621230297,
+    "naive_baseline_value": -20602047.788248334,
+    "improvement_over_naive": 35574322.409478635,
+    "false_positives_per_fraud_caught": 15.184230868332905
+  },
+  "business_impact_net": {
+    "threshold": 0.006123399927495639,
+    "convention": "net_of_principal",
+    "recall": 0.9549704724409449,
+    "false_positive_rate": 0.5167258538296287,
+    "precision": 0.06178854022384614,
+    "annual_transactions": 1197483.888888889,
+    "annual_fraud": 41204.09557649667,
+    "annual_tp": 39348.69461918887,
+    "annual_fn": 1855.400957307797,
+    "annual_fp": 597479.6634652925,
+    "gross_benefit": 18887373.417210657,
+    "false_negative_loss": 0.0,
+    "false_positive_cost": 2987398.317326463,
+    "net_annual_value": 15899975.099884193,
+    "naive_baseline_value": 0.0,
+    "improvement_over_naive": 15899975.099884193,
+    "false_positives_per_fraud_caught": 15.184230868332905
+  },
+  "target_precision": 0.3,
+  "target_recall": 0.8,
+  "meets_target_band": false,
+  "target_band_gap": {
+    "precision_shortfall": 0.23821145977615385,
+    "recall_shortfall": -0.15497047244094486
+  }
+}

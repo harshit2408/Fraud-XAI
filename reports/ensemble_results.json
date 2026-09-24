@@ -1,0 +1,86 @@
+{
+  "final_weights": {
+    "xgb": 0.618,
+    "tft": 0.008,
+    "lgbm": 0.374
+  },
+  "keep_lgbm": true,
+  "lgbm_lift_val_pr_auc": 0.007321248209534503,
+  "lgbm_lift_test_pr_auc_diagnostic": 0.009393366858547414,
+  "min_lightgbm_lift_threshold": 0.005,
+  "threshold": 0.01283068153868707,
+  "no_tft_threshold": 0.011697487456461961,
+  "threshold_convention": "net_of_principal",
+  "diagnostics": {
+    "pairwise_correlation": {
+      "corr_xgb_tft": 0.8242439346634068,
+      "corr_xgb_lgbm": 0.9439776920293781,
+      "corr_tft_lgbm": 0.8651800652282067
+    },
+    "bootstrap_weight_ci": {
+      "xgb": {
+        "mean": 0.6070000000000001,
+        "std": 0.04360045871318328,
+        "p05": 0.55,
+        "p95": 0.7000000000000001
+      },
+      "tft": {
+        "mean": 0.051,
+        "std": 0.007000000000000001,
+        "p05": 0.05,
+        "p95": 0.05
+      },
+      "lgbm": {
+        "mean": 0.34199999999999986,
+        "std": 0.04399999999999999,
+        "p05": 0.2499999999999999,
+        "p95": 0.3999999999999999
+      }
+    }
+  },
+  "standalone": {
+    "xgb": {
+      "val_pr_auc": 0.659682105640808,
+      "test_pr_auc": 0.521577192368634
+    },
+    "tft": {
+      "val_pr_auc": 0.5222403813873395,
+      "test_pr_auc": 0.4531221550677519
+    },
+    "lgbm": {
+      "val_pr_auc": 0.6469769793450906,
+      "test_pr_auc": 0.5258018415566473
+    }
+  },
+  "two_way_baseline": {
+    "weights": {
+      "xgb": 0.912,
+      "tft": 0.08799999999999997
+    },
+    "val_pr_auc": 0.6766514449869971,
+    "test_pr_auc": 0.5407772303649635
+  },
+  "three_way_challenger": {
+    "weights": {
+      "xgb": 0.618,
+      "tft": 0.008,
+      "lgbm": 0.374
+    },
+    "val_pr_auc": 0.6839726931965316,
+    "test_pr_auc": 0.5501705972235109
+  },
+  "final": {
+    "val_pr_auc": 0.6839726931965316,
+    "test_pr_auc": 0.5501705972235109,
+    "test_roc_auc": 0.915426461287729,
+    "test_TP": 3659,
+    "test_TN": 82165,
+    "test_FP": 31880,
+    "test_FN": 405,
+    "test_precision": 0.10295731449956386,
+    "test_recall": 0.9003444881889764,
+    "test_f1": 0.18478398101153953,
+    "test_accuracy": 0.7266508056117654
+  },
+  "dataset_hash": "d20f03c02e8de9b1358025a639374c1913a0dce8f8c129b576839e01ebed06c6"
+}

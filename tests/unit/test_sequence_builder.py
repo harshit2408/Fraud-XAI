@@ -316,3 +316,63 @@ class TestFeatureScaling:
         result = sb.build_sequences(X, y)  # no fit_scaler kwarg
         assert sb.scaler is None
         assert not np.isnan(result["sequences"]).any()
+
+
+class TestFitScalerOn:
+    """2026-09-09 (4-agent ML review, ecc:code-reviewer): `fit_scaler_on`
+    lets a caller fit the QuantileTransformer on a train-only frame before
+    building sequences over a larger (e.g. train+val) combined frame, so the
+    scaler's quantile boundaries never see val/test rows. Regression guard
+    for the leak in train_tft.py's `_build_sequences_for_splits` caller,
+    reproducing the proof used to find it: the fitted scaler's quantile
+    range must not reach a value that exists only outside the fit frame."""
+
+    def test_scaler_is_fit_only_on_the_given_frame(self):
+        train = pd.DataFrame({
+            "card1": [1] * 10,
+            "TransactionAmt": np.arange(1.0, 11.0),  # 1..10
+        })
+        val = pd.DataFrame({
+            "card1": [1] * 10,
+            "TransactionAmt": np.arange(1000.0, 1010.0),  # 1000..1009, disjoint
+        })
+
+        sb = SequenceBuilder(sequence_length=3)
+        sb.fit_scaler_on(train)
+
+        assert sb.scaler is not None
+        fitted_max = sb.scaler.quantiles_[-1, 0]
+        assert fitted_max <= 10.0, (
+            f"scaler.quantiles_ max is {fitted_max}, which reaches into val's "
+            "range (1000-1009) — fit_scaler_on must only see the train frame"
+        )
+        assert sb.scaler.n_quantiles == 10, (
+            "n_quantiles should derive from the 10 train rows only, not "
+            "train+val combined"
+        )
+
+    def test_combined_build_reuses_the_pre_fitted_train_only_scaler(self):
+        """The intended calling pattern: fit_scaler_on(train), then build
+        sequences over train+val with fit_scaler=False. The stored scaler
+        (and therefore its quantile range) must stay the train-only one."""
+        train = pd.DataFrame({
+            "card1": [1] * 10,
+            "TransactionAmt": np.arange(1.0, 11.0),
+        })
+        val = pd.DataFrame({
+            "card1": [1] * 10,
+            "TransactionAmt": np.arange(1000.0, 1010.0),
+        })
+        combined = pd.concat([train, val], axis=0, ignore_index=True)
+        combined_y = pd.Series([0] * 20)
+
+        sb = SequenceBuilder(sequence_length=3)
+        sb.fit_scaler_on(train)
+        train_only_max = sb.scaler.quantiles_[-1, 0]
+
+        sb.build_sequences(combined, combined_y, fit_scaler=False)
+
+        assert sb.scaler.quantiles_[-1, 0] == train_only_max, (
+            "build_sequences(fit_scaler=False) must not refit the scaler "
+            "even when the frame it transforms includes val rows"
+        )

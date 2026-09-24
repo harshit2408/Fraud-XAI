@@ -57,7 +57,11 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_LOG_DIRS: /var/lib/kafka/data
-      CLUSTER_ID: "fraud-detection-cluster-01"
+      # Must be a 16-byte value base64url-encoded to 22 chars — cp-kafka 7.5.0
+      # rejects anything else ("not a valid UUID"). The PRD's literal
+      # "fraud-detection-cluster-01" is too long to decode; this is a fixed,
+      # arbitrary v4 UUID so the single-node cluster id is stable across restarts.
+      CLUSTER_ID: "Zmr21tRkQ_ie1I2xM4Uxxw"
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
       interval: 10s

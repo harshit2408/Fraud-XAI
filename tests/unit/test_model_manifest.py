@@ -166,8 +166,19 @@ def dataset_dir(tmp_path: Path) -> Path:
     return d
 
 
-def test_build_manifest_populates_all_fields(config: Dict[str, Any], dataset_dir: Path):
+def test_build_manifest_populates_all_fields(
+    config: Dict[str, Any], dataset_dir: Path, monkeypatch
+):
     settings = Settings.model_validate(config)
+
+    # `git_sha=None` is the documented "resolve it from git" path, so this test
+    # must stub the resolver to stay hermetic. Without the stub the assertion
+    # below is decided by whether the checkout happens to be a git repo with a
+    # commit — it passed only while this tree had no commits, and flipped to
+    # failing the moment one landed.
+    monkeypatch.setattr(
+        "src.training.manifest.resolve_git_sha", lambda *args, **kwargs: None
+    )
 
     manifest = build_manifest(
         model_type="xgboost",
@@ -232,7 +243,7 @@ def test_write_manifest_creates_valid_json_sidecar(
         dataset_files=["train_features.parquet", "train_labels.parquet"],
         random_seed=42,
         metrics={"pr_auc_test": 0.56},
-        git_sha=None,
+        git_sha="0" * 40,  # explicit, so the round-trip does not shell out to git
     )
 
     model_path = tmp_path / "models" / "xgb_model.pkl"

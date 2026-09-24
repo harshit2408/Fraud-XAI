@@ -144,11 +144,27 @@ def _derive_causal_features(fe: FeatureEngineer, df: pd.DataFrame) -> pd.DataFra
         logger.info(f"Creating {description}...")
         df = step(df)
 
+    # ADR-002 §6: advance the per-card accumulators exactly once, AFTER every
+    # causal feature has been derived from one consistent pre-frame snapshot.
+    # Folding them in inside create_card_aggregates instead would leave
+    # create_velocity_features reading a `last_dt` already advanced to this
+    # frame's own maximum. Amounts and timestamps carry no labels, so
+    # accumulating over the full ordered frame (train+val+test) is not
+    # leakage — it is the most recent card history a served transaction,
+    # which arrives after every row here, would genuinely have.
+    logger.info("Recording per-card aggregate state for serving...")
+    fe.update_card_aggregate_state(df)
+
     return df
 
 
 def _apply_stateful_transforms(
-    fe: FeatureEngineer, df: pd.DataFrame, split_name: str, fit: bool
+    fe: FeatureEngineer,
+    df: pd.DataFrame,
+    split_name: str,
+    fit: bool,
+    time_col: str,
+    target_encoding_label_lag_seconds: float,
 ) -> pd.DataFrame:
     """
     Apply the transformers that carry fitted state to one split.
@@ -164,11 +180,34 @@ def _apply_stateful_transforms(
     logger.info(f"[{split_name}] card hash features (fit={fit})...")
     df = fe.create_card_hash_features(df, fit=fit)
 
+    # PRD Phase 9 P9-2: per-UID (card1_addr1_D1n) aggregate features. Same
+    # fit-on-train / apply-elsewhere contract as the card hash above, and
+    # placed here so it reads the raw card1/addr1/D1/TransactionDT columns
+    # before imputation and encoding replace them.
+    logger.info(f"[{split_name}] UID client-identifier aggregates (fit={fit})...")
+    df = fe.create_uid_features(df, fit=fit)
+
+    # PRD Phase 9 P9-4: dist1 value-gradient features, scoped to ProductCD=='W'.
+    # Same fit-on-train / apply-elsewhere contract as the UID maps above, and
+    # placed here so it reads the raw ProductCD strings before
+    # encode_categoricals replaces them with codes.
+    logger.info(f"[{split_name}] dist1 signal features (fit={fit})...")
+    df = fe.create_dist_features(df, fit=fit)
+
     # val folds its history into the carried state so test continues from
     # train+val, reproducing what a single pass over the full frame would give.
     update_state = split_name in SPLITS_THAT_UPDATE_STATE
-    logger.info(f"[{split_name}] expanding target encodings (fit={fit})...")
-    df = fe.create_target_encoding(df, fit=fit, update_state=update_state)
+    logger.info(
+        f"[{split_name}] expanding target encodings (fit={fit}, "
+        f"label_lag_seconds={target_encoding_label_lag_seconds})..."
+    )
+    df = fe.create_target_encoding(
+        df,
+        fit=fit,
+        update_state=update_state,
+        time_col=time_col,
+        label_lag_seconds=target_encoding_label_lag_seconds,
+    )
 
     logger.info(f"[{split_name}] missing value handling (fit={fit})...")
     df = fe.handle_missing_values(df, fit=fit)
@@ -250,10 +289,21 @@ def run_pipeline(config: dict) -> None:
     # target encoding carries entity history forward per SPLIT_ORDER. Iterating
     # a named tuple (rather than a dict or set) makes that order load-bearing
     # and visible, instead of resting on incidental iteration order.
+    # Finding F6: 0 (the FeaturesConfig default) preserves the original
+    # same-window behavior for any config that hasn't set this key;
+    # config/config.yaml sets a documented positive value.
+    label_lag_days = config["features"].get("target_encoding_label_lag_days", 0.0)
+    target_encoding_label_lag_seconds = label_lag_days * 86400
+
     transformed = {}
     for name in SPLIT_ORDER:
         transformed[name] = _apply_stateful_transforms(
-            fe, split_frames.pop(name), name, fit=(name == "train")
+            fe,
+            split_frames.pop(name),
+            name,
+            fit=(name == "train"),
+            time_col=temporal_col,
+            target_encoding_label_lag_seconds=target_encoding_label_lag_seconds,
         )
 
     non_feature_cols = [SPLIT_ID_COL, temporal_col, TARGET_COL]
@@ -286,6 +336,16 @@ def run_pipeline(config: dict) -> None:
     # ── Step 8: Save fitted transformers ─────────────────────────────────────
     fe.save_transformers(str(transformer_dir))
     logger.info(f"Transformers saved to {transformer_dir}/")
+
+    # ADR-001 §3.5: the fraud-api container mounts ./models but NOT ./data, so
+    # a copy has to live under models/ for serving to load it at all. Written
+    # here rather than copied later so the two can never drift apart.
+    serving_transformer_dir = Path(
+        config.get("serving", {}).get("transformer_path", "models/transformers")
+    )
+    serving_transformer_dir.mkdir(parents=True, exist_ok=True)
+    fe.save_transformers(str(serving_transformer_dir))
+    logger.info(f"Serving transformers saved to {serving_transformer_dir}/")
 
     logger.info("✓ Preprocessing pipeline complete.")
     logger.info(f"  Train features: {X_train.shape}")

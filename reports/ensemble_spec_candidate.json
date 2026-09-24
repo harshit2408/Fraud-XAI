@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "modes": {
+    "full": {
+      "models": [
+        "xgb",
+        "tft",
+        "lgbm"
+      ],
+      "weights": {
+        "xgb": 0.596,
+        "tft": 0.049999999999999996,
+        "lgbm": 0.354
+      },
+      "threshold": 0.012250989199107559
+    },
+    "no_tft": {
+      "models": [
+        "xgb"
+      ],
+      "weights": {
+        "xgb": 1.0
+      },
+      "threshold": 0.011697487456461961
+    }
+  },
+  "default_mode": "full",
+  "probability_space": "per_model_calibrated",
+  "dataset_hash": "d20f03c02e8de9b1358025a639374c1913a0dce8f8c129b576839e01ebed06c6",
+  "mlflow_run_id": "46aff3dc646641fe85ee69b5527e7dd3"
+}

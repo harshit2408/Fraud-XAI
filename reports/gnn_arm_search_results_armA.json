@@ -1,0 +1,36 @@
+{
+  "incumbent_val_pr_auc": 0.526,
+  "gate1_threshold": 0.5502,
+  "results": [
+    {
+      "variant": "arm_a_card_full",
+      "gnn_overrides": {
+        "edge_spec_set": "card_full"
+      },
+      "val_pr_auc_final_epoch": 0.5254976042697856,
+      "val_pr_auc_best_epoch": 0.5255634546055177,
+      "epochs_run": 22,
+      "mean_epoch_seconds": 61.31145363636394,
+      "wall_clock_seconds": 1352.2804483999935,
+      "beats_incumbent_val": false,
+      "clears_gate1": false
+    },
+    {
+      "variant": "arm_a_addr_card",
+      "gnn_overrides": {
+        "edge_spec_set": "addr_card"
+      },
+      "val_pr_auc_final_epoch": 0.5255924235035434,
+      "val_pr_auc_best_epoch": 0.5255984085518239,
+      "epochs_run": 25,
+      "mean_epoch_seconds": 68.54156945199938,
+      "wall_clock_seconds": 1715.798792600006,
+      "beats_incumbent_val": false,
+      "clears_gate1": false
+    }
+  ],
+  "best_variant": "arm_a_addr_card",
+  "best_val_pr_auc": 0.5255984085518239,
+  "gate0_pass": false,
+  "gate1_pass": false
+}

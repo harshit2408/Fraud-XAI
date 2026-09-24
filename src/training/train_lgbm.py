@@ -1,10 +1,10 @@
 import argparse
 import logging
-import pickle
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
+import joblib
 import mlflow
 import numpy as np
 import pandas as pd
@@ -14,8 +14,11 @@ import lightgbm as lgb
 PROJECT_ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.config import load_settings
+from src.config import Settings, load_settings
 from src.evaluation.evaluator import ModelEvaluator
+from src.training.manifest import build_manifest, write_manifest
+from src.training.run_logging import RunLogger
+from src.utils.checksums import verify_checksums, write_checksums
 from src.utils.seed import set_seed
 
 logging.basicConfig(
@@ -23,6 +26,56 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def _artifact_paths(base_path: Path) -> Dict[str, Path]:
+    """
+    Derive the three files an LGBMTrainer artifact is actually split across
+    — parity with XGBTrainer/TFTTrainer's `_artifact_paths` (Phase D6).
+
+    Closes finding F2: `models/lgbm_model.pkl` used to be a single raw
+    `pickle.dump`/`pickle.load` round-trip — an arbitrary-code-on-load
+    surface with no manifest and no checksum, the one artifact D6's
+    migration missed. `base_path` (e.g. "models/lgbm_model.pkl") is treated
+    purely as a stem, matching the other two trainers:
+      - "model":     LightGBM's own native text format
+                      (Booster.save_model), not pickle.
+      - "metadata":  feature names, config, frozen threshold, calibrator —
+                      via joblib. The Booster itself is never put in here,
+                      so this file has no reason to ever need arbitrary
+                      code execution to load.
+      - "checksums": sha256 of the two files above; verified before either
+                      is deserialized (see LGBMTrainer.load).
+    """
+    return {
+        "model": base_path.with_name(f"{base_path.stem}.txt"),
+        "metadata": base_path.with_name(f"{base_path.stem}.meta.joblib"),
+        "checksums": base_path.with_name(f"{base_path.stem}.checksums.json"),
+    }
+
+
+def _make_tb_checkpoint_callback(run_logger: RunLogger, checkpoint_every: int = 100, keep_last: int = 3):
+    """
+    LightGBM training callback (the `callbacks=[...]` protocol): streams
+    every eval-set metric to TensorBoard each boosting round, and
+    periodically checkpoints the in-progress booster — parity with
+    `TensorBoardCheckpointCallback` in train_xgb.py.
+    """
+
+    def _callback(env: "lgb.callback.CallbackEnv") -> None:
+        metrics = {
+            f"{dataset_name}/{eval_name}": value
+            for dataset_name, eval_name, value, _ in env.evaluation_result_list
+        }
+        run_logger.log_scalars(metrics, step=env.iteration)
+
+        if checkpoint_every and (env.iteration + 1) % checkpoint_every == 0:
+            ckpt_path = run_logger.checkpoint_path(env.iteration, suffix="txt")
+            env.model.save_model(str(ckpt_path))
+            run_logger.prune_checkpoints(keep_last=keep_last)
+
+    _callback.order = 10
+    return _callback
 
 
 class LGBMTrainer:
@@ -70,16 +123,38 @@ class LGBMTrainer:
         self._early_stopping_rounds = early_stopping
         return self.model
 
-    def train(self, X_train: pd.DataFrame, y_train: pd.Series, X_val: pd.DataFrame, y_val: pd.Series) -> None:
+    def train(
+        self,
+        X_train: pd.DataFrame,
+        y_train: pd.Series,
+        X_val: pd.DataFrame,
+        y_val: pd.Series,
+        run_logger: Optional[RunLogger] = None,
+    ) -> None:
         if self.model is None:
             raise ValueError("Model not built. Call build_model() first.")
-            
+
         self.feature_names = list(X_train.columns)
-        
+
         logger.info(f"Training LightGBM with {len(X_train)} train rows, {len(X_val)} val rows.")
-        
-        callbacks = [lgb.early_stopping(stopping_rounds=self._early_stopping_rounds, verbose=True)]
-        
+
+        # early_stopping_rounds <= 0 means "train the full n_estimators" —
+        # config/config.yaml currently sets this to 0 (see comment there):
+        # the 2026-08-19 audit's run stopped at iteration 4 of 1200 with
+        # stopping_rounds=100, which is a training failure to investigate,
+        # not a converged model. Passing 0 straight into lgb.early_stopping
+        # would stop immediately, so skip the callback entirely instead.
+        callbacks = []
+        if self._early_stopping_rounds and self._early_stopping_rounds > 0:
+            callbacks.append(lgb.early_stopping(stopping_rounds=self._early_stopping_rounds, verbose=True))
+        else:
+            logger.warning(
+                "Early stopping disabled (early_stopping_rounds <= 0) — "
+                "training the full n_estimators trees."
+            )
+        if run_logger is not None:
+            callbacks.append(_make_tb_checkpoint_callback(run_logger))
+
         self.model.fit(
             X_train,
             y_train,
@@ -87,20 +162,28 @@ class LGBMTrainer:
             eval_metric="average_precision",
             callbacks=callbacks
         )
-        
+
         logger.info(f"Training complete. Best iteration: {self.model.best_iteration_}")
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
         if self.model is None:
             raise ValueError("Model is not trained or loaded.")
-            
+
         # Ensure column order matches training
         if self.feature_names:
             missing_cols = set(self.feature_names) - set(X.columns)
             if missing_cols:
                 raise ValueError(f"Missing columns in input: {missing_cols}")
             X = X[self.feature_names]
-            
+
+        # After load(), self.model is a raw lgb.Booster (native format, no
+        # pickle — see _artifact_paths); right after train(), it is still
+        # the sklearn LGBMClassifier wrapper. Booster.predict() on a
+        # binary-objective model already returns P(positive class) — the
+        # same quantity LGBMClassifier.predict_proba(X)[:, 1] returns — so
+        # both branches are equivalent from every caller's point of view.
+        if isinstance(self.model, lgb.Booster):
+            return np.asarray(self.model.predict(X))
         return self.model.predict_proba(X)[:, 1]
 
     def predict_proba_calibrated(self, X: pd.DataFrame) -> np.ndarray:
@@ -130,42 +213,72 @@ class LGBMTrainer:
         return (self.predict_proba(X) >= self.threshold).astype(int)
 
     def save(self, path: str) -> None:
+        """Persist the trained model (closes finding F2: no pickle anywhere
+        here — parity with XGBTrainer.save()/TFTTrainer.save()).
+
+        Writes three files derived from `path` (see `_artifact_paths`): the
+        booster in LightGBM's own native text format, a joblib metadata
+        sidecar (feature names, config, frozen threshold, calibrator), and
+        a sha256 checksum manifest covering both — verified by `load()`
+        before either file is deserialized.
+        """
         if self.model is None:
             raise ValueError("Model is not trained. Cannot save.")
 
-        save_dict = {
-            "model": self.model,
+        base_path = Path(path)
+        base_path.parent.mkdir(parents=True, exist_ok=True)
+        paths = _artifact_paths(base_path)
+
+        booster = self.model.booster_ if hasattr(self.model, "booster_") else self.model
+        booster.save_model(str(paths["model"]))
+
+        metadata = {
             "feature_names": self.feature_names,
             "config": self.config,
             "threshold": self.threshold,
             "calibrator": self.calibrator,
         }
+        joblib.dump(metadata, paths["metadata"])
 
-        # Ensure parent directory exists
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        write_checksums(
+            paths["checksums"], {"model": paths["model"], "metadata": paths["metadata"]}
+        )
 
-        with open(path, "wb") as f:
-            pickle.dump(save_dict, f)
-        logger.info(f"Model saved to {path}")
+        logger.info(f"Model saved to {paths['model']} (+ metadata, checksums)")
 
     @classmethod
     def load(cls, path: str) -> 'LGBMTrainer':
-        with open(path, "rb") as f:
-            save_dict = pickle.load(f)
+        """Load a model saved by `save()`.
 
-        trainer = cls(save_dict["config"])
-        trainer.model = save_dict["model"]
-        trainer.feature_names = save_dict["feature_names"]
+        Verifies the sha256 checksum manifest before deserializing anything
+        — a corrupted or tampered artifact must never reach `joblib.load()`
+        or LightGBM's model reader. Raises (does not fall back) on a failed
+        check. `self.model` after `load()` is a raw `lgb.Booster`, not the
+        `LGBMClassifier` sklearn wrapper `train()` builds — see the dispatch
+        in `predict_proba()`.
+        """
+        base_path = Path(path)
+        paths = _artifact_paths(base_path)
+
+        verify_checksums(
+            paths["checksums"], {"model": paths["model"], "metadata": paths["metadata"]}
+        )
+
+        metadata = joblib.load(paths["metadata"])
+
+        trainer = cls(metadata["config"])
+        trainer.model = lgb.Booster(model_file=str(paths["model"]))
+        trainer.feature_names = metadata["feature_names"]
         # .get() — older artifacts saved before Phase C4 won't have these keys.
-        trainer.threshold = save_dict.get("threshold")
-        trainer.calibrator = save_dict.get("calibrator")
+        trainer.threshold = metadata.get("threshold")
+        trainer.calibrator = metadata.get("calibrator")
         if trainer.threshold is None or trainer.calibrator is None:
             logger.warning(
                 "Loaded artifact has no frozen threshold/calibrator — "
                 "pre-Phase-C4 artifact. predict()/predict_proba_calibrated() will raise."
             )
 
-        logger.info(f"Model loaded from {path}")
+        logger.info(f"Model loaded from {paths['model']}")
         return trainer
 
 
@@ -174,7 +287,8 @@ def main() -> None:
     parser.add_argument("--config", default="config/config.yaml")
     args = parser.parse_args()
 
-    config = load_settings(args.config).model_dump()
+    settings = load_settings(args.config)
+    config = settings.model_dump()
     seed = set_seed(config.get("project", {}).get("random_seed", 42))
     data_cfg = config["data"]
     processed_dir = Path(data_cfg["processed_dir"])
@@ -191,21 +305,37 @@ def main() -> None:
     X_test = pd.read_parquet(processed_dir / "test_features.parquet")
     y_test = pd.read_parquet(processed_dir / "test_labels.parquet").squeeze()
     
-    # Calculate scale_pos_weight
-    neg_count = (y_train == 0).sum()
-    pos_count = (y_train == 1).sum()
-    scale_pos_weight = neg_count / pos_count
-    logger.info(f"Class imbalance: {neg_count} neg / {pos_count} pos -> scale_pos_weight = {scale_pos_weight:.2f}")
+    # scale_pos_weight: config override, else the empirical neg/pos ratio
+    # (PRD Phase 9 P9-3). Shared resolver with train_xgb.py.
+    from src.training.train_xgb import resolve_scale_pos_weight
+
+    neg_count = int((y_train == 0).sum())
+    pos_count = int((y_train == 1).sum())
+    scale_pos_weight = resolve_scale_pos_weight(
+        config, neg_count, pos_count, model_key="lightgbm"
+    )
+    logger.info(
+        "Class imbalance: %d neg / %d pos (ratio %.2f) -> scale_pos_weight = %.4f",
+        neg_count,
+        pos_count,
+        neg_count / pos_count,
+        scale_pos_weight,
+    )
 
     # Set up MLflow
     mlflow_cfg = config.get("mlflow", {})
     mlflow.set_tracking_uri(mlflow_cfg.get("tracking_uri", "http://localhost:5000"))
     mlflow.set_experiment(mlflow_cfg.get("experiment_name", "fraud_detection"))
     
-    with mlflow.start_run(run_name="lgbm_enhanced_features"):
+    with mlflow.start_run(run_name="lgbm_enhanced_features") as run, RunLogger(
+        run_type="lightgbm", run_name=f"lgbm_{run.info.run_id[:8]}"
+    ) as run_logger:
+        run_id = run.info.run_id
+        logger.info(f"MLflow run ID: {run_id}")
+
         trainer = LGBMTrainer(config)
         trainer.build_model(scale_pos_weight=scale_pos_weight)
-        
+
         # Log params
         lgbm_params = trainer.model.get_params()
         mlflow.log_params({k: v for k, v in lgbm_params.items() if v is not None})
@@ -215,9 +345,11 @@ def main() -> None:
         mlflow.log_param("val_rows", len(X_val))
         mlflow.log_param("test_rows", len(X_test))
         mlflow.log_param("feature_count", len(X_train.columns))
+        mlflow.log_param("tensorboard_log_dir", str(run_logger.log_dir))
+        mlflow.log_param("checkpoint_dir", str(run_logger.checkpoint_dir))
 
         # Train with validation set for early stopping
-        trainer.train(X_train, y_train, X_val, y_val)
+        trainer.train(X_train, y_train, X_val, y_val, run_logger=run_logger)
         
         # Evaluate on all splits for overfitting analysis
         logger.info("Evaluating on all splits...")
@@ -378,12 +510,49 @@ def main() -> None:
         # Save model
         model_path = "models/lgbm_model.pkl"
         trainer.save(model_path)
-        mlflow.log_artifact(model_path)
-        
+        # save() no longer writes the literal `model_path` (Phase D6 parity
+        # with XGBTrainer/TFTTrainer) — it's a stem _artifact_paths()
+        # derives three real files from (model, metadata, checksums). Log
+        # each of those, not the nonexistent stem.
+        for artifact_path in _artifact_paths(Path(model_path)).values():
+            mlflow.log_artifact(str(artifact_path))
+
+        # Closes finding F2: LightGBM previously wrote no manifest at all —
+        # the only trained model on disk with no traceable link back to the
+        # config/dataset/git commit that produced it. Same mechanism as
+        # train_xgb.py/train_tft.py.
+        manifest = build_manifest(
+            model_type="lightgbm",
+            mlflow_run_id=run_id,
+            settings=settings,
+            dataset_dir=processed_dir,
+            dataset_files=[
+                "train_features.parquet",
+                "train_labels.parquet",
+                "val_features.parquet",
+                "val_labels.parquet",
+                "test_features.parquet",
+                "test_labels.parquet",
+            ],
+            random_seed=seed,
+            metrics={
+                "pr_auc_train": pr_auc_train,
+                "pr_auc_val": pr_auc_val,
+                "pr_auc_test": pr_auc_test,
+                "roc_auc_test": roc_auc_test,
+                "overfit_gap_train_test": overfit_gap_train_test,
+                "optimal_threshold": optimal_t,
+                "best_f1": best_f1,
+                "best_f1_threshold": best_f1_threshold,
+            },
+        )
+        manifest_path = write_manifest(model_path, manifest)
+        mlflow.log_artifact(str(manifest_path))
+
         # Print classification report
         logger.info("\n" + evaluator.generate_classification_report(y_test, y_pred))
-        
-        logger.info("Enhanced feature training complete!")
+
+        logger.info(f"Enhanced feature training complete! MLflow run ID: {run_id}")
 
 
 if __name__ == "__main__":

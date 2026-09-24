@@ -25,7 +25,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 FIGURES_DIR = Path("reports/figures")
@@ -49,15 +51,35 @@ def plot_dimension(table: pd.DataFrame, dimension: str, save_path: Path) -> None
     bar_width = 0.32
 
     fig, ax = plt.subplots(figsize=(max(6, 1.6 * len(slices)), 5))
-    ax.bar(x - bar_width / 2, table["recall"], bar_width, label="Recall", color=COLOR_RECALL)
-    ax.bar(x + bar_width / 2, table["precision"], bar_width, label="Precision", color=COLOR_PRECISION)
+    ax.bar(
+        x - bar_width / 2,
+        table["recall"],
+        bar_width,
+        label="Recall",
+        color=COLOR_RECALL,
+    )
+    ax.bar(
+        x + bar_width / 2,
+        table["precision"],
+        bar_width,
+        label="Precision",
+        color=COLOR_PRECISION,
+    )
 
     # Unreliable slices (< min_slice_size rows) get a muted asterisk cue
     # rather than being silently indistinguishable from well-populated ones.
     for i, reliable in enumerate(table["reliable"]):
         if not reliable:
-            ax.text(x[i], 0.02, "*thin slice", ha="center", va="bottom",
-                     fontsize=8, color=COLOR_TEXT_MUTED, style="italic")
+            ax.text(
+                x[i],
+                0.02,
+                "*thin slice",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                color=COLOR_TEXT_MUTED,
+                style="italic",
+            )
 
     ax.set_xticks(x)
     ax.set_xticklabels(x_labels, color=COLOR_TEXT_SECONDARY)

@@ -19,6 +19,7 @@ def pytest_configure(config: pytest.Config) -> None:
     """Register the markers used across the suite so `-m` selection works cleanly."""
     config.addinivalue_line("markers", "unit: fast, isolated test with no external dependencies")
     config.addinivalue_line("markers", "integration: test spanning multiple modules or the filesystem")
+    config.addinivalue_line("markers", "performance: latency/throughput test against real model artifacts")
 
 
 @pytest.fixture(scope="session")

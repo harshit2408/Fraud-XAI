@@ -191,3 +191,33 @@ class TestPredictProbaSignature:
             "history_X must change the built sequence (and thus the prediction), "
             "not be silently ignored"
         )
+
+
+class TestScalerFitScopeInTrain:
+    """Regression guard for the 2026-09-09 fix (4-agent ML review,
+    ecc:code-reviewer): `TFTTrainer.train` used to pass `fit_scaler=True`
+    straight into `_build_sequences_for_splits`, which fits over the
+    train+val CONCATENATION — leaking val's distribution into the scaler.
+    `_build_sequences_for_splits` itself is unit-tested elsewhere (this
+    file, above) without `fit_scaler=True`, so it cannot catch a `train()`
+    call site regressing back to the leaky pattern. Assert the source
+    directly, the same way test_ensemble_eval.py guards its min-lift gate
+    call site."""
+
+    def test_train_fits_scaler_on_train_only_before_the_combined_build(self):
+        import inspect
+
+        source = inspect.getsource(TFTTrainer.train)
+        code_lines = [
+            line for line in source.splitlines() if not line.strip().startswith("#")
+        ]
+        code = "\n".join(code_lines)
+
+        assert "fit_scaler_on(X_train)" in code, (
+            "TFTTrainer.train must fit the scaler on X_train alone via "
+            "SequenceBuilder.fit_scaler_on before building train+val sequences"
+        )
+        assert "fit_scaler=True" not in code, (
+            "TFTTrainer.train must not pass fit_scaler=True to the combined "
+            "train+val sequence build — that fits the scaler on both splits"
+        )

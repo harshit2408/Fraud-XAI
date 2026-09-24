@@ -1,0 +1,10 @@
+2026-09-13 01:51:31,293 [INFO] __main__: Loading parquet data (val screen — test loaded for graph topology only)...
+2026-09-13 01:51:32,049 [INFO] __main__: Data loaded: train=413378, val=59053, test=118109 (test labels loaded for R7-compliant topology only — never scored by this script)
+2026-09-13 01:51:32,049 [INFO] __main__: ============================================================
+2026-09-13 01:51:32,049 [INFO] __main__: ARM A — richer edges, frozen architecture (ADR-006 §3.1)
+2026-09-13 01:51:32,049 [INFO] __main__: ============================================================
+2026-09-13 01:51:32,124 [INFO] src.utils.seed: Random seed set to 42 (deterministic_cuda=False)
+2026-09-13 01:51:32,124 [INFO] src.device: Resolved device 'auto' -> 'cuda'
+2026-09-13 01:51:32,128 [INFO] src.training.train_gnn: Using CUDA: NVIDIA GeForce RTX 4060 Laptop GPU
+2026-09-13 01:51:33,444 [INFO] src.training.train_gnn: Loading cached graph from data\processed\graph\fraud_graph.card_full.pt
+2026-09-13 01:51:34,864 [INFO] src.data.graph_builder: Graph loaded from data\processed\graph\fraud_graph.card_full.pt
